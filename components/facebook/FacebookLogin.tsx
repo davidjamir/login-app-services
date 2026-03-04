@@ -35,6 +35,7 @@ export default function FacebookLogin() {
 
                 const longTerm = await facebookService.exchangeShortToken(shortToken)
                 setUserToken(longTerm.access_token)
+                setStatus("Log In!")
 
                 const pages = await facebookService.getPages(longTerm.access_token)
                 setPages(pages)
