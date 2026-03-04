@@ -8,28 +8,42 @@ import { Input } from "@/components/ui/input"
 import { Copy } from "lucide-react"
 import { motion } from "framer-motion"
 import { useFacebookSDK } from "@/hooks/useFacebookSDK"
+import { facebookService } from "@/services/facebook.service"
+import { FacebookPage } from "@/types/facebook"
 
 export default function FacebookLogin() {
     const ready = useFacebookSDK(process.env.NEXT_PUBLIC_FB_APP_ID!)
-    const [status] = useState('Please log into this webpage.')
-    const [userToken] = useState<string | null>('EAAABBBBCCCCDDDDEEEEFFFFGGGG')
-    const [pages] = useState([
-        {
-            id: '1234567890',
-            name: 'Demo Page One',
-            access_token: 'EAAPAGE1111112222223333334444',
-        },
-        {
-            id: '9876543210',
-            name: 'Demo Page Two',
-            access_token: 'EAAPAGEAAAAABBBBBCCCCCDDDD',
-        },
-    ])
+    const [status, setStatus] = useState('Please log into this webpage.')
+    const [userToken, setUserToken] = useState<string | undefined>()
+    const [pages, setPages] = useState<FacebookPage[]>([])
 
     useEffect(() => {
         if (ready && window.FB?.XFBML) {
             window.FB.XFBML.parse()
         }
+    }, [ready])
+
+    useEffect(() => {
+        if (!ready) return
+
+        const check = async () => {
+            const res = await facebookService.getLoginStatus()
+
+            if (res.status === "connected") {
+                const shortToken = res.authResponse?.accessToken
+                if (!shortToken) return
+
+                const longTerm = await facebookService.exchangeShortToken(shortToken)
+                setUserToken(longTerm.access_token)
+
+                const pages = await facebookService.getPages(longTerm.access_token)
+                setPages(pages)
+            } else {
+                setStatus("Please log into this webpage.")
+            }
+        }
+
+        check()
     }, [ready])
 
     const shorten = (token?: string) => {
@@ -85,7 +99,7 @@ export default function FacebookLogin() {
                             data-button-type="continue_with"
                             data-use-continue-as="true"
                             data-auto-logout-link="false"
-                            data-scope="public_profile,email,pages_show_list,pages_manage_posts,pages_manage_engagement,"
+                            data-scope="public_profile,email,pages_show_list,pages_manage_posts,pages_manage_engagement"
                         ></div>
                     </div>
                 </div>

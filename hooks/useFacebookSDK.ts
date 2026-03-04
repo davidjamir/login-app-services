@@ -5,7 +5,8 @@ import { facebookService } from "@/services/facebook.service"
 
 export function useFacebookSDK(appId: string) {
   const [ready, setReady] = useState(false)
-const initialized = useRef(false)
+  const initialized = useRef(false)
+  const version = process.env.NEXT_PUBLIC_FB_APP_VERSION!
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -14,7 +15,7 @@ const initialized = useRef(false)
     initialized.current = true
 
     const init = () => {
-      facebookService.init(appId)
+      facebookService.init(appId, version)
       if (window.FB?.XFBML) {
         window.FB.XFBML.parse()
       }
@@ -38,7 +39,7 @@ const initialized = useRef(false)
     script.crossOrigin = "anonymous"
 
     document.body.appendChild(script)
-  }, [appId])
+  }, [appId, version])
 
   return ready
 }

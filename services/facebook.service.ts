@@ -1,12 +1,12 @@
 import { FacebookPage, FacebookUser,FacebookAuthResponse } from "@/types/facebook"
 
 export const facebookService = {
-  init(appId: string) {
+  init(appId: string, version: string) {
     window.FB.init({
       appId,
       cookie: true,
       xfbml: true,
-      version: "v25.0",
+      version,
     })
   },
 
@@ -41,4 +41,16 @@ export const facebookService = {
       )
     })
   },
+
+  async exchangeShortToken(shortToken: string) {
+    const res = await fetch("/api/facebook/exchangeToken", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken: shortToken })
+    })
+    if (!res.ok) {
+      throw new Error("Failed to exchange token")
+    }
+    return res.json()
+  }
 }
