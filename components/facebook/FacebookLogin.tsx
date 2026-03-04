@@ -6,7 +6,6 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Copy } from "lucide-react"
-import { motion } from "framer-motion"
 import { useFacebookSDK } from "@/hooks/useFacebookSDK"
 import { facebookService } from "@/services/facebook.service"
 import { FacebookPage } from "@/types/facebook"
@@ -106,81 +105,76 @@ export default function FacebookLogin() {
                 </div>
 
                 {/* Hero Section */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4 }}
-                >
-                    <Card className="rounded-2xl shadow-xl bg-white/70 backdrop-blur-xl border">
-                        <CardContent className="p-8 space-y-8">
-                            {/* Status */}
-                            <div>
-                                <h2 className="text-2xl font-semibold mb-2">{status}</h2>
+
+                <Card className="rounded-2xl shadow-xl bg-white/70 backdrop-blur-xl border">
+                    <CardContent className="p-8 space-y-8">
+                        {/* Status */}
+                        <div>
+                            <h2 className="text-2xl font-semibold mb-2">{status}</h2>
+                        </div>
+
+                        {/* User Token Row */}
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                                <h4 className="font-medium">User token:</h4>
+                                {userToken ? (
+                                    <div className="flex items-center gap-2">
+                                        <Input
+                                            value={shorten(userToken)}
+                                            readOnly
+                                            className="w-64"
+                                        />
+                                        <Button size="icon" variant="outline" onClick={() => copy(userToken)} className="cursor-pointer">
+                                            <Copy className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <span className="text-slate-500">No token available</span>
+                                )}
                             </div>
 
-                            {/* User Token Row */}
-                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                                <div className="flex items-center gap-4">
-                                    <h4 className="font-medium">User token:</h4>
-                                    {userToken ? (
-                                        <div className="flex items-center gap-2">
-                                            <Input
-                                                value={shorten(userToken)}
-                                                readOnly
-                                                className="w-64"
-                                            />
-                                            <Button size="icon" variant="outline" onClick={() => copy(userToken)} className="cursor-pointer">
-                                                <Copy className="w-4 h-4" />
-                                            </Button>
-                                        </div>
-                                    ) : (
-                                        <span className="text-slate-500">No token available</span>
-                                    )}
-                                </div>
+                            <Button className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer" >
+                                Save Page Token
+                            </Button>
+                        </div>
 
-                                <Button className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer" >
-                                    Save Page Token
-                                </Button>
-                            </div>
-
-                            {/* Pages Table */}
-                            <div className="rounded-xl border overflow-hidden">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-slate-50">
-                                        <tr className="text-center font-semibold">
-                                            <th className="p-3 w-12">#</th>
-                                            <th className="p-3">ID</th>
-                                            <th className="p-3">Name</th>
-                                            <th className="p-3">Token</th>
+                        {/* Pages Table */}
+                        <div className="rounded-xl border overflow-hidden">
+                            <table className="w-full text-sm">
+                                <thead className="bg-slate-50">
+                                    <tr className="text-center font-semibold">
+                                        <th className="p-3 w-12">#</th>
+                                        <th className="p-3">ID</th>
+                                        <th className="p-3">Name</th>
+                                        <th className="p-3">Token</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {pages.map((page, index) => (
+                                        <tr
+                                            key={page.id}
+                                            className="text-center border-t hover:bg-slate-50 transition"
+                                        >
+                                            <td className="p-3">{index + 1}</td>
+                                            <td className="p-3">{page.id}</td>
+                                            <td className="p-3 font-medium">{page.name}</td>
+                                            <td className="p-3">
+                                                <div className="flex items-center justify-center gap-3">
+                                                    <span className="font-mono text-xs">
+                                                        {shorten(page.access_token)}
+                                                    </span>
+                                                    <Button size="icon" variant="outline" onClick={() => copy(page.access_token)} className="cursor-pointer">
+                                                        <Copy className="w-4 h-4" />
+                                                    </Button>
+                                                </div>
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        {pages.map((page, index) => (
-                                            <tr
-                                                key={page.id}
-                                                className="text-center border-t hover:bg-slate-50 transition"
-                                            >
-                                                <td className="p-3">{index + 1}</td>
-                                                <td className="p-3">{page.id}</td>
-                                                <td className="p-3 font-medium">{page.name}</td>
-                                                <td className="p-3">
-                                                    <div className="flex items-center justify-center gap-3">
-                                                        <span className="font-mono text-xs">
-                                                            {shorten(page.access_token)}
-                                                        </span>
-                                                        <Button size="icon" variant="outline" onClick={() => copy(page.access_token)} className="cursor-pointer">
-                                                            <Copy className="w-4 h-4" />
-                                                        </Button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </motion.div>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </CardContent>
+                </Card>
 
                 <footer className="text-center text-xs text-slate-500 pt-4">
                     © Facebook Login Integration — Designed for smooth experience
