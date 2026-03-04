@@ -15,6 +15,7 @@ export default function FacebookLogin() {
     const [status, setStatus] = useState('Please log into this webpage.')
     const [userToken, setUserToken] = useState<string | undefined>()
     const [pages, setPages] = useState<FacebookPage[]>([])
+    const [saving, setSaving] = useState(false)
 
     useEffect(() => {
         if (ready && window.FB?.XFBML) {
@@ -65,6 +66,43 @@ export default function FacebookLogin() {
         }
     }
 
+    const handleSave = async () => {
+        if (!pages.length) return
+
+        try {
+            setSaving(true)
+
+            const payload = pages.map((page) => ({
+                pageId: page.id,
+                name: page.name,
+                source: "facebook",
+                token: page.access_token,
+            }))
+
+            const res = await fetch("/api/pages", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+            })
+
+            const data = await res.json()
+
+            if (!res.ok) {
+                throw new Error(data.error || "Failed to save pages")
+            }
+
+            alert("Saved successfully ✅")
+        } catch (err: unknown) {
+            const message =
+                err instanceof Error ? err.message : "Unknown error"
+
+            alert(message)
+        } finally {
+            setSaving(false)
+        }
+    }
     return (
         <div className="min-h-screen bg-white text-slate-900 relative overflow-hidden">
             {/* Background effects */}
@@ -133,8 +171,12 @@ export default function FacebookLogin() {
                                 )}
                             </div>
 
-                            <Button className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer" >
-                                Save Page Token
+                            <Button
+                                onClick={handleSave}
+                                disabled={saving || pages.length === 0}
+                                className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                            >
+                                {saving ? "Saving..." : "Save Page Token"}
                             </Button>
                         </div>
 
