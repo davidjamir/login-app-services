@@ -10,7 +10,7 @@ import { motion } from "framer-motion"
 import { useFacebookSDK } from "@/hooks/useFacebookSDK"
 
 export default function FacebookLogin() {
-    const ready = useFacebookSDK(process.env.FB_APP_ID!)
+    const ready = useFacebookSDK(process.env.NEXT_PUBLIC_FB_APP_ID!)
     const [status] = useState('Please log into this webpage.')
     const [userToken] = useState<string | null>('EAAABBBBCCCCDDDDEEEEFFFFGGGG')
     const [pages] = useState([
@@ -77,7 +77,7 @@ export default function FacebookLogin() {
                             <p className="text-xs text-slate-500">login → preview pages → saved</p>
                         </div>
                     </div>
-                    <div>
+                    <div className="pill" title="Button Login">
                         <div
                             className="fb-login-button"
                             data-max-rows="1"
