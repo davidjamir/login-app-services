@@ -9,6 +9,7 @@ import { Copy } from "lucide-react"
 import { useFacebookSDK } from "@/hooks/useFacebookSDK"
 import { facebookService } from "@/services/facebook.service"
 import { FacebookPage } from "@/types/facebook"
+import { toast } from "sonner"
 
 export default function FacebookLogin() {
     const ready = useFacebookSDK(process.env.NEXT_PUBLIC_FB_APP_ID!)
@@ -56,12 +57,13 @@ export default function FacebookLogin() {
     const copy = async (text: string) => {
         try {
             await navigator.clipboard.writeText(text)
-            console.log("Copied")
+            toast.success("Copied")
         } catch (err: unknown) {
             if (err instanceof Error) {
-                console.error(err.message)
+                toast.error(err.message)
             } else {
                 console.error("Unknown error", err)
+                toast.error("Unknown error")
             }
         }
     }
@@ -93,12 +95,12 @@ export default function FacebookLogin() {
                 throw new Error(data.error || "Failed to save pages")
             }
 
-            alert("Saved successfully ✅")
+            toast.success("Saved successfully")
         } catch (err: unknown) {
             const message =
                 err instanceof Error ? err.message : "Unknown error"
 
-            alert(message)
+            toast.error(message)
         } finally {
             setSaving(false)
         }
