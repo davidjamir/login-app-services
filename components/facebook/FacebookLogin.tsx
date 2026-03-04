@@ -79,7 +79,7 @@ export default function FacebookLogin() {
                 token: page.access_token,
             }))
 
-            const res = await fetch("/api/pages", {
+            const res = await fetch("/api/database/saveToken", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
