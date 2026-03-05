@@ -1,52 +1,57 @@
 'use client'
 
 import Image from 'next/image'
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Copy } from "lucide-react"
-import { useFacebookSDK } from "@/hooks/useFacebookSDK"
 import { facebookService } from "@/services/facebook.service"
 import { FacebookPage } from "@/types/facebook"
 import { toast } from "sonner"
 
 export default function FacebookLogin() {
-    const ready = useFacebookSDK(process.env.NEXT_PUBLIC_FB_APP_ID!)
-    const [status, setStatus] = useState('Please log into this webpage.')
+    const [status, setStatus] = useState('Enter your permanent user token and save to continue.')
     const [userToken, setUserToken] = useState<string | undefined>()
+    const [tokenInput, setTokenInput] = useState('')
     const [pages, setPages] = useState<FacebookPage[]>([])
     const [saving, setSaving] = useState(false)
+    const [tokenSaving, setTokenSaving] = useState(false)
 
-    useEffect(() => {
-        if (ready && window.FB?.XFBML) {
-            window.FB.XFBML.parse()
+    const handleSave = () => {
+        const inputToken = tokenInput.trim()
+        if (!inputToken) {
+            toast.error("Please enter user token")
+            return
         }
-    }, [ready])
+        setUserToken(inputToken)
+        setTokenInput(inputToken)
+        setStatus("Token saved. Loading pages...")
+        toast.success("User token saved")
+    }
 
     useEffect(() => {
-        if (!ready) return
+        if (!userToken) return
 
-        const check = async () => {
-            const res = await facebookService.getLoginStatus()
+        const fetchPages = async () => {
+            try {
+                setTokenSaving(true)
+                const fetchedPages = await facebookService.getPages(userToken)
+                setPages(fetchedPages)
+                setStatus("Pages loaded.")
+            } catch (err: unknown) {
+                const message =
+                    err instanceof Error ? err.message : "Unknown error"
 
-            if (res.status === "connected") {
-                const shortToken = res.authResponse?.accessToken
-                if (!shortToken) return
-
-                const longTerm = await facebookService.exchangeShortToken(shortToken)
-                setUserToken(longTerm.access_token)
-                setStatus("Log In!")
-
-                const pages = await facebookService.getPages(longTerm.access_token)
-                setPages(pages)
-            } else {
-                setStatus("Please log into this webpage.")
+                toast.error(message)
+                setStatus("Unable to load pages. Please check token and try again.")
+            } finally {
+                setTokenSaving(false)
             }
         }
 
-        check()
-    }, [ready])
+        fetchPages()
+    }, [userToken])
 
     const shorten = (token?: string) => {
         if (!token) return ''
@@ -68,7 +73,7 @@ export default function FacebookLogin() {
         }
     }
 
-    const handleSave = async () => {
+    const handlePageSave = async () => {
         if (!pages.length) return
 
         try {
@@ -77,7 +82,7 @@ export default function FacebookLogin() {
             const payload = pages.map((page) => ({
                 pageId: page.id,
                 name: page.name,
-                source: "facebook",
+                source: "System User",
                 token: page.access_token,
             }))
 
@@ -131,17 +136,6 @@ export default function FacebookLogin() {
                             <p className="text-xs text-slate-500">login → preview pages → saved</p>
                         </div>
                     </div>
-                    <div className="pill" title="Button Login">
-                        <div
-                            className="fb-login-button"
-                            data-max-rows="1"
-                            data-size="large"
-                            data-button-type="continue_with"
-                            data-use-continue-as="true"
-                            data-auto-logout-link="false"
-                            data-scope="public_profile,email,pages_show_list,pages_manage_posts,pages_manage_engagement"
-                        ></div>
-                    </div>
                 </div>
 
                 {/* Hero Section */}
@@ -157,24 +151,28 @@ export default function FacebookLogin() {
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                             <div className="flex items-center gap-4">
                                 <h4 className="font-medium">User token:</h4>
-                                {userToken ? (
-                                    <div className="flex items-center gap-2">
-                                        <Input
-                                            value={shorten(userToken)}
-                                            readOnly
-                                            className="w-64"
-                                        />
-                                        <Button size="icon" variant="outline" onClick={() => copy(userToken)} className="cursor-pointer">
-                                            <Copy className="w-4 h-4" />
-                                        </Button>
-                                    </div>
-                                ) : (
-                                    <span className="text-slate-500">No token available</span>
-                                )}
+                                <div className="flex items-center gap-2">
+                                    <Input
+                                        value={tokenInput}
+                                        onChange={(e) => setTokenInput(e.target.value)}
+                                        placeholder="Paste user token here"
+                                        className="w-[420px]"
+                                    />
+                                    <Button size="icon" variant="outline" onClick={() => copy(tokenInput)} className="cursor-pointer">
+                                        <Copy className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                        onClick={handleSave}
+                                        disabled={tokenSaving || !tokenInput.trim()}
+                                        className="bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-500 hover:from-indigo-600 hover:via-blue-600 hover:to-cyan-600 text-white shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer"
+                                    >
+                                        {tokenSaving ? "Saving..." : "Save"}
+                                    </Button>
+                                </div>
                             </div>
 
                             <Button
-                                onClick={handleSave}
+                                onClick={handlePageSave}
                                 disabled={saving || pages.length === 0}
                                 className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
                             >
