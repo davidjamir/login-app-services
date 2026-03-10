@@ -1,10 +1,13 @@
 import { FacebookPage } from "@/types/facebook"
 
+const LIMIT = 100
+
 export const facebookService = {
   async getPages(token: string): Promise<FacebookPage[]> {
     const url = new URL("https://graph.facebook.com/me/accounts")
     url.searchParams.set("fields", "id,name,access_token")
     url.searchParams.set("access_token", token)
+    url.searchParams.set("limit", LIMIT.toString())
 
     const res = await fetch(url.toString())
     if (!res.ok) {
