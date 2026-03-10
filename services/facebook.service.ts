@@ -1,6 +1,6 @@
 import { FacebookPage } from "@/types/facebook"
 
-const LIMIT = 100
+const LIMIT = 200
 
 export const facebookService = {
   async getPages(token: string): Promise<FacebookPage[]> {
