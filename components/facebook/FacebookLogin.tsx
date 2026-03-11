@@ -100,6 +100,8 @@ export default function FacebookLogin() {
                 pageId: page.id,
                 name: page.name,
                 source: "System User",
+                systemUserName: selectedUser?.name ?? "",
+                category: page.category ?? "",
                 token: page.access_token,
             }))
 

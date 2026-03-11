@@ -61,6 +61,7 @@ export interface FacebookPage {
   id: string
   name: string
   access_token: string
+  category?: string
 }
 
 export interface FacebookAuthResponse {

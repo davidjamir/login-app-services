@@ -7,6 +7,8 @@ export interface Page {
   pageId: string
   name: string
   source: string
+  systemUserName: string
+  category: string
   token: string
 }
 
