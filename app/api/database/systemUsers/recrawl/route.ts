@@ -49,7 +49,6 @@ export async function POST(req: Request) {
       { _id: new ObjectId(_id.trim()) },
       {
         $set: {
-          id: fbUser.id,
           name: fbUser.name,
           updatedAt: new Date(),
         },
