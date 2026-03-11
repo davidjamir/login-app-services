@@ -50,6 +50,7 @@ export interface FacebookUser {
 }
 
 export interface SystemUser {
+  _id?: string
   id: string
   name: string
   token: string

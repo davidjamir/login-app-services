@@ -12,7 +12,7 @@ export async function GET() {
         {},
         {
           projection: {
-            _id: 0,
+            _id: 1,
             id: 1,
             name: 1,
             appName: 1,
@@ -25,7 +25,12 @@ export async function GET() {
       .sort({ updatedAt: -1 })
       .toArray()
 
-    return NextResponse.json({ success: true, data: users })
+    const normalizedUsers = users.map((user) => ({
+      ...user,
+      _id: String(user._id),
+    }))
+
+    return NextResponse.json({ success: true, data: normalizedUsers })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error"
     return NextResponse.json(

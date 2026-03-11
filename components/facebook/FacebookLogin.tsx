@@ -12,14 +12,13 @@ import { toast } from "sonner"
 export default function FacebookLogin() {
     const [status, setStatus] = useState('Select a system user to crawl page tokens.')
     const [systemUsers, setSystemUsers] = useState<SystemUser[]>([])
-    const [selectedUserKey, setSelectedUserKey] = useState("")
+    const [selectedUserIndex, setSelectedUserIndex] = useState("")
     const [pages, setPages] = useState<FacebookPage[]>([])
     const [saving, setSaving] = useState(false)
     const [loadingPages, setLoadingPages] = useState(false)
 
-    const selectedUser = systemUsers.find(
-        (user) => `${user.id}::${user.appName ?? ""}` === selectedUserKey
-    )
+    const selectedUser =
+        selectedUserIndex !== "" ? systemUsers[Number(selectedUserIndex)] : undefined
 
     const loadSystemUsers = async () => {
         try {
@@ -32,9 +31,10 @@ export default function FacebookLogin() {
 
             const users = (data.data ?? []) as SystemUser[]
             setSystemUsers(users)
-            setSelectedUserKey((prev) =>
-                users.some((user) => `${user.id}::${user.appName ?? ""}` === prev) ? prev : ""
-            )
+            setSelectedUserIndex((prev) => {
+                const index = Number(prev)
+                return Number.isInteger(index) && index >= 0 && index < users.length ? prev : ""
+            })
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : "Unknown error"
             toast.error(message)
@@ -70,7 +70,7 @@ export default function FacebookLogin() {
         }
 
         void fetchPages()
-    }, [selectedUserKey, selectedUser?.token])
+    }, [selectedUserIndex, selectedUser?.token])
 
     const shorten = (token?: string) => {
         if (!token) return ''
@@ -153,15 +153,15 @@ export default function FacebookLogin() {
 
                     <div className="flex flex-col md:flex-row md:items-center gap-3">
                         <select
-                            value={selectedUserKey}
-                            onChange={(e) => setSelectedUserKey(e.target.value)}
+                            value={selectedUserIndex}
+                            onChange={(e) => setSelectedUserIndex(e.target.value)}
                             className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm"
                         >
                             <option value="" disabled>
                                 {systemUsers.length === 0 ? "No system users" : "Select system user (name • app • id)"}
                             </option>
-                            {systemUsers.map((user) => (
-                                <option key={`${user.id}::${user.appName ?? ""}`} value={`${user.id}::${user.appName ?? ""}`}>
+                            {systemUsers.map((user, index) => (
+                                <option key={index} value={String(index)}>
                                     {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
                                 </option>
                             ))}

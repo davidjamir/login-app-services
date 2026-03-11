@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
-import { Copy, Loader2, RefreshCcw } from "lucide-react"
+import { Copy, Loader2, RefreshCcw, Trash2 } from "lucide-react"
 import { SystemUser } from "@/types/facebook"
 import { facebookService } from "@/services/facebook.service"
 
@@ -18,7 +18,9 @@ export default function SystemUserManager() {
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [isCrawling, setIsCrawling] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [refreshingUserId, setRefreshingUserId] = useState<string | null>(null)
+  const [refreshingRowKey, setRefreshingRowKey] = useState<string | null>(null)
+  const [deletingUserKey, setDeletingUserKey] = useState<string | null>(null)
+  const [adminPasswordInput, setAdminPasswordInput] = useState("")
   const [lastCrawledToken, setLastCrawledToken] = useState("")
   const [status, setStatus] = useState("Input token to start crawling")
 
@@ -136,15 +138,14 @@ export default function SystemUserManager() {
     }
   }
 
-  const handleRecrawlAndSave = async (user: SystemUser) => {
+  const handleRecrawlAndSave = async (user: SystemUser, rowKey: string) => {
     if (!user.token) {
       toast.error("Missing token for this system user")
       return
     }
 
-    const userKey = `${user.id}::${user.appName ?? ""}`
     try {
-      setRefreshingUserId(userKey)
+      setRefreshingRowKey(rowKey)
       const res = await fetch("/api/database/systemUsers/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -162,7 +163,44 @@ export default function SystemUserManager() {
       const message = error instanceof Error ? error.message : "Unknown error"
       toast.error(message)
     } finally {
-      setRefreshingUserId(null)
+      setRefreshingRowKey(null)
+    }
+  }
+
+  const handleDeleteSystemUser = async (user: SystemUser, rowKey: string) => {
+    if (!adminPasswordInput.trim()) {
+      toast.error("Please input admin password before delete")
+      return
+    }
+
+    if (!user._id) {
+      toast.error("Missing system user record id")
+      return
+    }
+
+    try {
+      setDeletingUserKey(rowKey)
+      const res = await fetch("/api/database/systemUsers/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          _id: user._id,
+          password: adminPasswordInput,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || data.message || "Failed to delete system user")
+      }
+
+      toast.success(data.message || "System user deleted successfully")
+      await loadSavedUsers()
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      toast.error(message)
+    } finally {
+      setDeletingUserKey(null)
     }
   }
 
@@ -259,7 +297,16 @@ export default function SystemUserManager() {
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-lg font-semibold tracking-tight">System Users</h3>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold tracking-tight">System Users</h3>
+              <Input
+                type="password"
+                value={adminPasswordInput}
+                onChange={(e) => setAdminPasswordInput(e.target.value)}
+                placeholder="Admin password"
+                className="w-full max-w-[260px]"
+              />
+            </div>
             <div className="overflow-hidden rounded-xl border border-slate-200">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
@@ -273,8 +320,10 @@ export default function SystemUserManager() {
                   </tr>
                 </thead>
                 <tbody>
-                  {savedUsers.map((user) => (
-                    <tr key={`${user.id}::${user.appName ?? ""}`} className="border-t hover:bg-slate-50/60">
+                  {savedUsers.map((user, index) => {
+                    const rowKey = String(index)
+                    return (
+                    <tr key={index} className="border-t hover:bg-slate-50/60">
                       <td className="p-3 font-mono">{user.id}</td>
                       <td className="p-3">{user.name}</td>
                       <td className="p-3">{user.appName || "-"}</td>
@@ -294,21 +343,41 @@ export default function SystemUserManager() {
                           <Button
                             size="icon"
                             variant="outline"
-                            onClick={() => handleRecrawlAndSave(user)}
-                            disabled={refreshingUserId === `${user.id}::${user.appName ?? ""}`}
+                            onClick={() => handleRecrawlAndSave(user, rowKey)}
+                            disabled={
+                              refreshingRowKey === rowKey ||
+                              deletingUserKey === rowKey
+                            }
                             className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                             title="Recrawl and save"
                           >
-                            {refreshingUserId === `${user.id}::${user.appName ?? ""}` ? (
+                            {refreshingRowKey === rowKey ? (
                               <RefreshCcw className="h-4 w-4 animate-spin" />
                             ) : (
                               <RefreshCcw className="h-4 w-4" />
                             )}
                           </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            onClick={() => handleDeleteSystemUser(user, rowKey)}
+                            disabled={
+                              deletingUserKey === rowKey ||
+                              refreshingRowKey === rowKey
+                            }
+                            className="cursor-pointer border-red-200 bg-white text-red-600 hover:bg-red-50 hover:text-red-700"
+                            title="Delete system user"
+                          >
+                            {deletingUserKey === rowKey ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </Button>
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                   {!loadingUsers && savedUsers.length === 0 && (
                     <tr className="border-t">
                       <td className="p-3 text-slate-500" colSpan={6}>
