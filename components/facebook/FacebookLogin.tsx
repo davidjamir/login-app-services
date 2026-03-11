@@ -74,7 +74,8 @@ export default function FacebookLogin() {
     }
 
     useEffect(() => {
-        if (!selectedUser?.token) {
+        const token = selectedUser?.token
+        if (!isAdminVerified || !token) {
             setPages([])
             return
         }
@@ -83,7 +84,7 @@ export default function FacebookLogin() {
             try {
                 setLoadingPages(true)
                 setStatus("Crawling pages...")
-                const fetchedPages = await facebookService.getPages(selectedUser.token)
+                const fetchedPages = await facebookService.getPages(token)
                 setPages(fetchedPages)
                 setStatus("Pages loaded. Click Save Page Token to store in database.")
             } catch (err: unknown) {
@@ -98,7 +99,7 @@ export default function FacebookLogin() {
         }
 
         void fetchPages()
-    }, [selectedUserIndex, selectedUser?.token])
+    }, [selectedUserIndex, selectedUser?.token, isAdminVerified])
 
     const shorten = (token?: string) => {
         if (!token) return ''

@@ -16,7 +16,6 @@ export async function GET() {
             id: 1,
             name: 1,
             appName: 1,
-            token: 1,
             createdAt: 1,
             updatedAt: 1,
           },

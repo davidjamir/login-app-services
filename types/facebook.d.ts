@@ -53,7 +53,7 @@ export interface SystemUser {
   _id?: string
   id: string
   name: string
-  token: string
+  token?: string
   appName?: string
   createdAt?: string | Date
   updatedAt?: string | Date

@@ -11,6 +11,9 @@ import { SystemUser } from "@/types/facebook"
 import { facebookService } from "@/services/facebook.service"
 
 export default function SystemUserManager() {
+  const [isAdminVerified, setIsAdminVerified] = useState(false)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState("")
   const [tokenInput, setTokenInput] = useState("")
   const [appNameInput, setAppNameInput] = useState("")
   const [previewUser, setPreviewUser] = useState<SystemUser | null>(null)
@@ -22,30 +25,53 @@ export default function SystemUserManager() {
   const [deletingUserKey, setDeletingUserKey] = useState<string | null>(null)
   const [adminPasswordInput, setAdminPasswordInput] = useState("")
   const [lastCrawledToken, setLastCrawledToken] = useState("")
-  const [status, setStatus] = useState("Input token to start crawling")
+  const [status, setStatus] = useState("Please enter admin password first")
 
-  const loadSavedUsers = async () => {
+  const loadSavedUsers = async (password: string) => {
+    const res = await fetch("/api/database/systemUsers/secure-list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    })
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(data.error || data.message || "Failed to load system users")
+    }
+
+    setSavedUsers((data.data ?? []) as SystemUser[])
+  }
+
+  const handleVerifyAdmin = async () => {
+    const password = adminPasswordInput.trim()
+    if (!password) {
+      toast.error("Please input admin password")
+      return
+    }
+
     try {
+      setAuthLoading(true)
       setLoadingUsers(true)
-      const res = await fetch("/api/database/systemUsers")
-      const data = await res.json()
-
-      if (!res.ok) {
-        throw new Error(data.error || data.message || "Failed to load system users")
-      }
-
-      setSavedUsers((data.data ?? []) as SystemUser[])
+      setAuthError("")
+      await loadSavedUsers(password)
+      setIsAdminVerified(true)
+      setStatus("Input token to start crawling")
+      toast.success("Admin verified")
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error"
+      const message = error instanceof Error ? error.message : "Invalid admin password"
+      setIsAdminVerified(false)
+      setSavedUsers([])
+      setPreviewUser(null)
+      setTokenInput("")
+      setAppNameInput("")
+      setStatus("Please enter admin password first")
+      setAuthError(message)
       toast.error(message)
     } finally {
+      setAuthLoading(false)
       setLoadingUsers(false)
     }
   }
-
-  useEffect(() => {
-    void loadSavedUsers()
-  }, [])
 
   const crawlUser = async (token: string) => {
     try {
@@ -71,6 +97,12 @@ export default function SystemUserManager() {
   useEffect(() => {
     const token = tokenInput.trim()
 
+    if (!isAdminVerified) {
+      setPreviewUser(null)
+      setIsCrawling(false)
+      return
+    }
+
     if (!token) {
       setPreviewUser(null)
       setIsCrawling(false)
@@ -86,7 +118,7 @@ export default function SystemUserManager() {
     }, 3000)
 
     return () => clearTimeout(timeout)
-  }, [tokenInput])
+  }, [tokenInput, isAdminVerified])
 
   const handleSave = async () => {
     const token = tokenInput.trim()
@@ -119,7 +151,7 @@ export default function SystemUserManager() {
       )
       toast.success("System user saved")
       setStatus("Saved successfully")
-      await loadSavedUsers()
+      await loadSavedUsers(adminPasswordInput.trim())
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error"
       toast.error(message)
@@ -139,17 +171,21 @@ export default function SystemUserManager() {
   }
 
   const handleRecrawlAndSave = async (user: SystemUser, rowKey: string) => {
-    if (!user.token) {
-      toast.error("Missing token for this system user")
+    if (!adminPasswordInput.trim()) {
+      toast.error("Please input admin password before recrawl")
+      return
+    }
+    if (!user._id) {
+      toast.error("Missing system user record id")
       return
     }
 
     try {
       setRefreshingRowKey(rowKey)
-      const res = await fetch("/api/database/systemUsers/save", {
+      const res = await fetch("/api/database/systemUsers/recrawl", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: user.token, appName: user.appName ?? "" }),
+        body: JSON.stringify({ _id: user._id, password: adminPasswordInput }),
       })
       const data = await res.json()
 
@@ -158,7 +194,7 @@ export default function SystemUserManager() {
       }
 
       toast.success("Recrawled and saved")
-      await loadSavedUsers()
+      await loadSavedUsers(adminPasswordInput.trim())
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error"
       toast.error(message)
@@ -195,7 +231,7 @@ export default function SystemUserManager() {
       }
 
       toast.success(data.message || "System user deleted successfully")
-      await loadSavedUsers()
+      await loadSavedUsers(adminPasswordInput.trim())
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error"
       toast.error(message)
@@ -233,7 +269,28 @@ export default function SystemUserManager() {
               System User Manager
             </div>
             <h2 className="text-2xl font-semibold tracking-tight">Save System User</h2>
-            <p className="text-sm text-slate-600">{status}</p>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <p className="text-sm text-slate-600">{status}</p>
+                {authError && <p className="text-xs text-red-600">{authError}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="password"
+                  value={adminPasswordInput}
+                  onChange={(e) => setAdminPasswordInput(e.target.value)}
+                  placeholder="Admin password"
+                  className="h-9 w-44 text-xs"
+                />
+                <Button
+                  onClick={handleVerifyAdmin}
+                  disabled={authLoading || !adminPasswordInput.trim()}
+                  className="h-9 min-w-24 cursor-pointer border border-slate-300 bg-slate-50 px-3 text-xs text-slate-700 shadow-sm hover:bg-slate-100"
+                >
+                  {authLoading ? "Checking..." : "Unlock"}
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
@@ -241,15 +298,17 @@ export default function SystemUserManager() {
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
               placeholder="Paste access token"
+              disabled={!isAdminVerified}
             />
             <Input
               value={appNameInput}
               onChange={(e) => setAppNameInput(e.target.value.toLowerCase())}
               placeholder="App name (optional)"
+              disabled={!isAdminVerified}
             />
             <Button
               onClick={handleSave}
-              disabled={isCrawling || saving || !previewUser}
+              disabled={!isAdminVerified || isCrawling || saving || !previewUser}
               className={`min-w-28 cursor-pointer border border-slate-300 shadow-sm transition-colors duration-200 ${
                 isCrawling || saving || !previewUser
                   ? "bg-white text-slate-400 hover:bg-white"
@@ -297,16 +356,7 @@ export default function SystemUserManager() {
           </div>
 
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-lg font-semibold tracking-tight">System Users</h3>
-              <Input
-                type="password"
-                value={adminPasswordInput}
-                onChange={(e) => setAdminPasswordInput(e.target.value)}
-                placeholder="Admin password"
-                className="w-full max-w-[260px]"
-              />
-            </div>
+            <h3 className="text-lg font-semibold tracking-tight">System Users</h3>
             <div className="overflow-hidden rounded-xl border border-slate-200">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
@@ -334,9 +384,10 @@ export default function SystemUserManager() {
                           <Button
                             size="icon"
                             variant="outline"
-                            onClick={() => copy(user.id)}
+                            onClick={() => copy(user.token ?? "")}
+                            disabled={!user.token}
                             className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
-                            title="Copy system user id"
+                            title="Copy access token"
                           >
                             <Copy className="h-4 w-4" />
                           </Button>
@@ -345,6 +396,7 @@ export default function SystemUserManager() {
                             variant="outline"
                             onClick={() => handleRecrawlAndSave(user, rowKey)}
                             disabled={
+                              !isAdminVerified ||
                               refreshingRowKey === rowKey ||
                               deletingUserKey === rowKey
                             }
@@ -362,6 +414,7 @@ export default function SystemUserManager() {
                             variant="outline"
                             onClick={() => handleDeleteSystemUser(user, rowKey)}
                             disabled={
+                              !isAdminVerified ||
                               deletingUserKey === rowKey ||
                               refreshingRowKey === rowKey
                             }
