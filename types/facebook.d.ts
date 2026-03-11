@@ -53,6 +53,7 @@ export interface SystemUser {
   id: string
   name: string
   token: string
+  appName?: string
   createdAt?: string | Date
   updatedAt?: string | Date
 }

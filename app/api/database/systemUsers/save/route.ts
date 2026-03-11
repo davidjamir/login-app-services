@@ -6,7 +6,7 @@ export const runtime = "nodejs"
 
 export async function POST(req: Request) {
   try {
-    const { token } = await req.json() as { token?: string }
+    const { token, appName } = await req.json() as { token?: string; appName?: string }
 
     if (!token?.trim()) {
       return NextResponse.json(
@@ -16,16 +16,18 @@ export async function POST(req: Request) {
     }
 
     const cleanToken = token.trim()
+    const cleanAppName = appName?.trim().toLowerCase() ?? ""
     const fbUser = await facebookService.getMe(cleanToken)
 
     const db = await getDb()
     const result = await db.collection("system_users").findOneAndUpdate(
-      { id: fbUser.id },
+      { id: fbUser.id, appName: cleanAppName },
       {
         $set: {
           id: fbUser.id,
           name: fbUser.name,
           token: cleanToken,
+          appName: cleanAppName,
           updatedAt: new Date(),
         },
         $setOnInsert: {
@@ -40,6 +42,7 @@ export async function POST(req: Request) {
       data: {
         id: fbUser.id,
         name: fbUser.name,
+        appName: cleanAppName,
         createdAt: result?.createdAt ?? null,
         updatedAt: result?.updatedAt ?? null,
       },

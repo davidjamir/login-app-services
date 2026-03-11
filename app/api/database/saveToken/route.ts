@@ -7,7 +7,9 @@ export interface Page {
   pageId: string
   name: string
   source: string
+  systemUserId: string
   systemUserName: string
+  appName: string
   category: string
   token: string
 }

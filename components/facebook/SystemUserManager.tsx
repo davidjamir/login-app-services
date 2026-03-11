@@ -12,6 +12,7 @@ import { facebookService } from "@/services/facebook.service"
 
 export default function SystemUserManager() {
   const [tokenInput, setTokenInput] = useState("")
+  const [appNameInput, setAppNameInput] = useState("")
   const [previewUser, setPreviewUser] = useState<SystemUser | null>(null)
   const [savedUsers, setSavedUsers] = useState<SystemUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
@@ -50,6 +51,7 @@ export default function SystemUserManager() {
       setPreviewUser({
         id: fbUser.id,
         name: fbUser.name,
+        appName: appNameInput.trim(),
         token,
       })
       setLastCrawledToken(token)
@@ -96,7 +98,7 @@ export default function SystemUserManager() {
       const res = await fetch("/api/database/systemUsers/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, appName: appNameInput.trim() }),
       })
       const data = await res.json()
 
@@ -140,12 +142,13 @@ export default function SystemUserManager() {
       return
     }
 
+    const userKey = `${user.id}::${user.appName ?? ""}`
     try {
-      setRefreshingUserId(user.id)
+      setRefreshingUserId(userKey)
       const res = await fetch("/api/database/systemUsers/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: user.token }),
+        body: JSON.stringify({ token: user.token, appName: user.appName ?? "" }),
       })
       const data = await res.json()
 
@@ -195,11 +198,16 @@ export default function SystemUserManager() {
             <p className="text-sm text-slate-600">{status}</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
             <Input
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
               placeholder="Paste access token"
+            />
+            <Input
+              value={appNameInput}
+              onChange={(e) => setAppNameInput(e.target.value.toLowerCase())}
+              placeholder="App name (optional)"
             />
             <Button
               onClick={handleSave}
@@ -227,6 +235,7 @@ export default function SystemUserManager() {
                   <tr className="text-left font-semibold">
                     <th className="p-3">System User ID</th>
                     <th className="p-3">Name</th>
+                    <th className="p-3">App Name</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -234,11 +243,12 @@ export default function SystemUserManager() {
                     <tr key={previewUser.id} className="border-t hover:bg-slate-50/60">
                       <td className="p-3 font-mono">{previewUser.id}</td>
                       <td className="p-3">{previewUser.name}</td>
+                      <td className="p-3">{appNameInput.trim() || "-"}</td>
                     </tr>
                   )}
                   {!previewUser && (
                     <tr className="border-t">
-                      <td className="p-3 text-slate-500" colSpan={2}>
+                      <td className="p-3 text-slate-500" colSpan={3}>
                         No crawled user yet.
                       </td>
                     </tr>
@@ -256,6 +266,7 @@ export default function SystemUserManager() {
                   <tr className="text-left font-semibold">
                     <th className="p-3">System User ID</th>
                     <th className="p-3">Name</th>
+                    <th className="p-3">App Name</th>
                     <th className="p-3">Created At</th>
                     <th className="p-3">Updated At</th>
                     <th className="p-3 text-center">Actions</th>
@@ -263,9 +274,10 @@ export default function SystemUserManager() {
                 </thead>
                 <tbody>
                   {savedUsers.map((user) => (
-                    <tr key={user.id} className="border-t hover:bg-slate-50/60">
+                    <tr key={`${user.id}::${user.appName ?? ""}`} className="border-t hover:bg-slate-50/60">
                       <td className="p-3 font-mono">{user.id}</td>
                       <td className="p-3">{user.name}</td>
+                      <td className="p-3">{user.appName || "-"}</td>
                       <td className="p-3">{formatDate(user.createdAt)}</td>
                       <td className="p-3">{formatDate(user.updatedAt)}</td>
                       <td className="p-3">
@@ -283,11 +295,11 @@ export default function SystemUserManager() {
                             size="icon"
                             variant="outline"
                             onClick={() => handleRecrawlAndSave(user)}
-                            disabled={refreshingUserId === user.id}
+                            disabled={refreshingUserId === `${user.id}::${user.appName ?? ""}`}
                             className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                             title="Recrawl and save"
                           >
-                            {refreshingUserId === user.id ? (
+                            {refreshingUserId === `${user.id}::${user.appName ?? ""}` ? (
                               <RefreshCcw className="h-4 w-4 animate-spin" />
                             ) : (
                               <RefreshCcw className="h-4 w-4" />
@@ -299,7 +311,7 @@ export default function SystemUserManager() {
                   ))}
                   {!loadingUsers && savedUsers.length === 0 && (
                     <tr className="border-t">
-                      <td className="p-3 text-slate-500" colSpan={5}>
+                      <td className="p-3 text-slate-500" colSpan={6}>
                         No saved system users.
                       </td>
                     </tr>

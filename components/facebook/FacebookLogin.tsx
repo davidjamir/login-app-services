@@ -12,12 +12,14 @@ import { toast } from "sonner"
 export default function FacebookLogin() {
     const [status, setStatus] = useState('Select a system user to crawl page tokens.')
     const [systemUsers, setSystemUsers] = useState<SystemUser[]>([])
-    const [selectedUserId, setSelectedUserId] = useState("")
+    const [selectedUserKey, setSelectedUserKey] = useState("")
     const [pages, setPages] = useState<FacebookPage[]>([])
     const [saving, setSaving] = useState(false)
     const [loadingPages, setLoadingPages] = useState(false)
 
-    const selectedUser = systemUsers.find((user) => user.id === selectedUserId)
+    const selectedUser = systemUsers.find(
+        (user) => `${user.id}::${user.appName ?? ""}` === selectedUserKey
+    )
 
     const loadSystemUsers = async () => {
         try {
@@ -30,8 +32,8 @@ export default function FacebookLogin() {
 
             const users = (data.data ?? []) as SystemUser[]
             setSystemUsers(users)
-            setSelectedUserId((prev) =>
-                users.some((user) => user.id === prev) ? prev : ""
+            setSelectedUserKey((prev) =>
+                users.some((user) => `${user.id}::${user.appName ?? ""}` === prev) ? prev : ""
             )
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : "Unknown error"
@@ -68,7 +70,7 @@ export default function FacebookLogin() {
         }
 
         void fetchPages()
-    }, [selectedUserId, selectedUser?.token])
+    }, [selectedUserKey, selectedUser?.token])
 
     const shorten = (token?: string) => {
         if (!token) return ''
@@ -100,7 +102,9 @@ export default function FacebookLogin() {
                 pageId: page.id,
                 name: page.name,
                 source: "System User",
+                systemUserId: selectedUser?.id ?? "",
                 systemUserName: selectedUser?.name ?? "",
+                appName: selectedUser?.appName ?? "",
                 category: page.category ?? "",
                 token: page.access_token,
             }))
@@ -149,16 +153,16 @@ export default function FacebookLogin() {
 
                     <div className="flex flex-col md:flex-row md:items-center gap-3">
                         <select
-                            value={selectedUserId}
-                            onChange={(e) => setSelectedUserId(e.target.value)}
+                            value={selectedUserKey}
+                            onChange={(e) => setSelectedUserKey(e.target.value)}
                             className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm"
                         >
                             <option value="" disabled>
-                                {systemUsers.length === 0 ? "No system users" : "Select system user"}
+                                {systemUsers.length === 0 ? "No system users" : "Select system user (name • app • id)"}
                             </option>
                             {systemUsers.map((user) => (
-                                <option key={user.id} value={user.id}>
-                                    {user.name}
+                                <option key={`${user.id}::${user.appName ?? ""}`} value={`${user.id}::${user.appName ?? ""}`}>
+                                    {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
                                 </option>
                             ))}
                         </select>
