@@ -4,8 +4,9 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import FacebookLogin from "@/components/facebook/FacebookLogin"
 import SystemUserManager from "@/components/facebook/SystemUserManager"
+import PageManager from "@/components/facebook/PageManager"
 
-type TabKey = "page-token" | "system-user"
+type TabKey = "page-token" | "system-user" | "page-manager"
 
 export default function FacebookTabs() {
   const [activeTab, setActiveTab] = useState<TabKey>("page-token")
@@ -22,7 +23,7 @@ export default function FacebookTabs() {
               : "border-transparent bg-white text-slate-500 hover:bg-slate-50"
           }`}
         >
-          Save Page Token
+          Page Token Manager
         </Button>
         <Button
           variant="outline"
@@ -33,11 +34,24 @@ export default function FacebookTabs() {
               : "border-transparent bg-white text-slate-500 hover:bg-slate-50"
           }`}
         >
-          Save System User
+          System User Manager
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => setActiveTab("page-manager")}
+          className={`h-9 cursor-pointer rounded-lg border-slate-200 px-4 ${
+            activeTab === "page-manager"
+              ? "bg-slate-100 text-slate-800 hover:bg-slate-100"
+              : "border-transparent bg-white text-slate-500 hover:bg-slate-50"
+          }`}
+        >
+          Page Manager
         </Button>
       </div>
 
-      {activeTab === "page-token" ? <FacebookLogin /> : <SystemUserManager />}
+      {activeTab === "page-token" && <FacebookLogin />}
+      {activeTab === "system-user" && <SystemUserManager />}
+      {activeTab === "page-manager" && <PageManager />}
     </div>
   )
 }

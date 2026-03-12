@@ -10,12 +10,32 @@ import { Copy, Loader2, RefreshCcw, Trash2 } from "lucide-react"
 import { SystemUser } from "@/types/facebook"
 import { facebookService } from "@/services/facebook.service"
 
+const parseFromFacebookName = (rawName: string) => {
+  const parts = rawName
+    .split("-")
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  const roleCode = (parts[0] ?? "").toUpperCase()
+  const role = roleCode === "AD" ? "admin" : "employee"
+  const businessName = parts[1] ?? ""
+  const description = parts.slice(2).join(" - ")
+
+  return {
+    roleCode: roleCode || "EM",
+    role,
+    businessName,
+    description,
+  }
+}
+
 export default function SystemUserManager() {
   const [isAdminVerified, setIsAdminVerified] = useState(false)
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState("")
   const [tokenInput, setTokenInput] = useState("")
   const [appNameInput, setAppNameInput] = useState("")
+  const [businessIdInput, setBusinessIdInput] = useState("")
   const [previewUser, setPreviewUser] = useState<SystemUser | null>(null)
   const [savedUsers, setSavedUsers] = useState<SystemUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
@@ -64,6 +84,7 @@ export default function SystemUserManager() {
       setPreviewUser(null)
       setTokenInput("")
       setAppNameInput("")
+      setBusinessIdInput("")
       setStatus("Please enter admin password first")
       setAuthError(message)
       toast.error(message)
@@ -76,10 +97,16 @@ export default function SystemUserManager() {
   const crawlUser = async (token: string) => {
     try {
       const fbUser = await facebookService.getMe(token)
+      const parsed = parseFromFacebookName(fbUser.name)
       setPreviewUser({
         id: fbUser.id,
         name: fbUser.name,
         appName: appNameInput.trim(),
+        businessId: businessIdInput.trim(),
+        businessName: parsed.businessName,
+        roleCode: parsed.roleCode,
+        role: parsed.role,
+        description: parsed.description,
         token,
       })
       setLastCrawledToken(token)
@@ -122,6 +149,14 @@ export default function SystemUserManager() {
 
   const handleSave = async () => {
     const token = tokenInput.trim()
+    const appName = appNameInput.trim()
+    const businessId = businessIdInput.trim()
+
+    if (!businessId) {
+      toast.error("Please input business id before saving")
+      return
+    }
+
     if (!token || !previewUser || token !== lastCrawledToken) {
       toast.error("Please wait for crawl result before saving")
       return
@@ -132,7 +167,11 @@ export default function SystemUserManager() {
       const res = await fetch("/api/database/systemUsers/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, appName: appNameInput.trim() }),
+        body: JSON.stringify({
+          token,
+          appName,
+          businessId,
+        }),
       })
       const data = await res.json()
 
@@ -244,18 +283,19 @@ export default function SystemUserManager() {
     if (!value) return "-"
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return "-"
-    return new Intl.DateTimeFormat("vi-VN", {
-      timeZone: "Asia/Ho_Chi_Minh",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).format(date)
-  }
 
+    const localDate = new Date(
+      date.toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" })
+    )
+
+    const hh = String(localDate.getHours()).padStart(2, "0")
+    const mm = String(localDate.getMinutes()).padStart(2, "0")
+    const dd = String(localDate.getDate()).padStart(2, "0")
+    const MM = String(localDate.getMonth() + 1).padStart(2, "0")
+    const yy = String(localDate.getFullYear()).slice(-2)
+
+    return `${hh}:${mm} ${dd}-${MM}-${yy}`
+  }
   return (
     <div className="max-w-5xl mx-auto px-6 py-10">
       <Card className="relative rounded-2xl border-slate-200 bg-white shadow-lg">
@@ -264,11 +304,7 @@ export default function SystemUserManager() {
         </div>
         <CardContent className="p-8 space-y-8">
           <div className="space-y-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              System User Manager
-            </div>
-            <h2 className="text-2xl font-semibold tracking-tight">Save System User</h2>
+            <h2 className="text-2xl font-semibold tracking-tight">System User Manager</h2>
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="space-y-1">
                 <p className="text-sm text-slate-600">{status}</p>
@@ -293,24 +329,41 @@ export default function SystemUserManager() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr_1fr_auto]">
             <Input
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
-              placeholder="Paste access token"
+              placeholder="Access token"
+              disabled={!isAdminVerified}
+            />
+            <Input
+              value={businessIdInput}
+              onChange={(e) => setBusinessIdInput(e.target.value)}
+              placeholder="Business ID"
               disabled={!isAdminVerified}
             />
             <Input
               value={appNameInput}
               onChange={(e) => setAppNameInput(e.target.value.toLowerCase())}
-              placeholder="App name (optional)"
+              placeholder="App (option)"
               disabled={!isAdminVerified}
             />
             <Button
               onClick={handleSave}
-              disabled={!isAdminVerified || isCrawling || saving || !previewUser}
+              disabled={
+                !isAdminVerified ||
+                isCrawling ||
+                saving ||
+                !previewUser ||
+                !tokenInput.trim() ||
+                !businessIdInput.trim()
+              }
               className={`min-w-28 cursor-pointer border border-slate-300 shadow-sm transition-colors duration-200 ${
-                isCrawling || saving || !previewUser
+                isCrawling ||
+                saving ||
+                !previewUser ||
+                !tokenInput.trim() ||
+                !businessIdInput.trim()
                   ? "bg-white text-slate-400 hover:bg-white"
                   : "bg-slate-50 text-slate-700 hover:bg-slate-100"
               }`}
@@ -332,7 +385,10 @@ export default function SystemUserManager() {
                   <tr className="text-left font-semibold">
                     <th className="p-3">System User ID</th>
                     <th className="p-3">Name</th>
-                    <th className="p-3">App Name</th>
+                    <th className="p-3">Business ID</th>
+                    <th className="p-3">Business Name</th>
+                    <th className="p-3">Role</th>
+                    <th className="p-3">App</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -353,12 +409,15 @@ export default function SystemUserManager() {
                         </div>
                       </td>
                       <td className="p-3">{previewUser.name}</td>
+                      <td className="p-3">{businessIdInput.trim() || previewUser.businessId || "-"}</td>
+                      <td className="p-3">{previewUser.businessName || "-"}</td>
+                      <td className="p-3">{previewUser.role || "-"}</td>
                       <td className="p-3">{appNameInput.trim() || "-"}</td>
                     </tr>
                   )}
                   {!previewUser && (
                     <tr className="border-t">
-                      <td className="p-3 text-slate-500" colSpan={3}>
+                      <td className="p-3 text-slate-500" colSpan={6}>
                         No crawled user yet.
                       </td>
                     </tr>
@@ -376,9 +435,8 @@ export default function SystemUserManager() {
                   <tr className="text-left font-semibold">
                     <th className="p-3">System User ID</th>
                     <th className="p-3">Name</th>
-                    <th className="p-3">App Name</th>
-                    <th className="p-3">Created At</th>
-                    <th className="p-3">Updated At</th>
+                    <th className="p-3">App</th>
+                    <th className="p-3">Updated</th>
                     <th className="p-3 text-center">Actions</th>
                   </tr>
                 </thead>
@@ -403,7 +461,6 @@ export default function SystemUserManager() {
                       </td>
                       <td className="p-3">{user.name}</td>
                       <td className="p-3">{user.appName || "-"}</td>
-                      <td className="p-3">{formatDate(user.createdAt)}</td>
                       <td className="p-3">{formatDate(user.updatedAt)}</td>
                       <td className="p-3">
                         <div className="flex items-center justify-center gap-2">
@@ -459,7 +516,7 @@ export default function SystemUserManager() {
                   )})}
                   {!loadingUsers && savedUsers.length === 0 && (
                     <tr className="border-t">
-                      <td className="p-3 text-slate-500" colSpan={6}>
+                      <td className="p-3 text-slate-500" colSpan={5}>
                         No saved system users.
                       </td>
                     </tr>

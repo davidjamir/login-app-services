@@ -172,11 +172,7 @@ export default function FacebookLogin() {
                 </div>
                 <CardContent className="p-8 space-y-8">
                     <div className="space-y-3">
-                        <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                            Page Token Manager
-                        </div>
-                        <h2 className="text-2xl font-semibold tracking-tight">Save Page Token</h2>
+                        <h2 className="text-2xl font-semibold tracking-tight">Page Token Manager</h2>
                         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div className="space-y-1">
                                 <p className="text-sm text-slate-600">{status}</p>

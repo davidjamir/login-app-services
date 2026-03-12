@@ -55,6 +55,11 @@ export interface SystemUser {
   name: string
   token?: string
   appName?: string
+  businessId?: string
+  businessName?: string
+  roleCode?: string
+  role?: "admin" | "employee" | string
+  description?: string
   createdAt?: string | Date
   updatedAt?: string | Date
 }
@@ -64,6 +69,12 @@ export interface FacebookPage {
   name: string
   access_token: string
   category?: string
+}
+
+export interface FacebookBusiness {
+  id: string
+  name: string
+  permitted_roles?: string[]
 }
 
 export interface FacebookAuthResponse {
