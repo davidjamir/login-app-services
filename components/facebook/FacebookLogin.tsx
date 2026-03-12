@@ -251,7 +251,20 @@ export default function FacebookLogin() {
                                     {pages.map((page, index) => (
                                         <tr key={page.id} className="border-t hover:bg-slate-50/60">
                                             <td className="p-3">{index + 1}</td>
-                                            <td className="p-3 font-mono">{page.id}</td>
+                                            <td className="p-3">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className="font-mono">{page.id}</span>
+                                                    <Button
+                                                        size="icon"
+                                                        variant="outline"
+                                                        onClick={() => copy(page.id)}
+                                                        className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                                                        title="Copy page id"
+                                                    >
+                                                        <Copy className="w-4 h-4" />
+                                                    </Button>
+                                                </div>
+                                            </td>
                                             <td className="p-3">{page.name}</td>
                                             <td className="p-3">
                                                 <div className="flex items-center gap-2">

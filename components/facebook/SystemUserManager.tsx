@@ -338,7 +338,20 @@ export default function SystemUserManager() {
                 <tbody>
                   {previewUser && (
                     <tr key={previewUser.id} className="border-t hover:bg-slate-50/60">
-                      <td className="p-3 font-mono">{previewUser.id}</td>
+                      <td className="p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono">{previewUser.id}</span>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            onClick={() => copy(previewUser.id)}
+                            className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                            title="Copy system user id"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
                       <td className="p-3">{previewUser.name}</td>
                       <td className="p-3">{appNameInput.trim() || "-"}</td>
                     </tr>
@@ -374,7 +387,20 @@ export default function SystemUserManager() {
                     const rowKey = String(index)
                     return (
                     <tr key={index} className="border-t hover:bg-slate-50/60">
-                      <td className="p-3 font-mono">{user.id}</td>
+                      <td className="p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono">{user.id}</span>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            onClick={() => copy(user.id)}
+                            className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                            title="Copy system user id"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
                       <td className="p-3">{user.name}</td>
                       <td className="p-3">{user.appName || "-"}</td>
                       <td className="p-3">{formatDate(user.createdAt)}</td>
