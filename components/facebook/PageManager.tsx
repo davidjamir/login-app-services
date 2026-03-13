@@ -1,17 +1,21 @@
 'use client'
 
 import Image from "next/image"
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Copy, RefreshCcw, Trash2 } from "lucide-react"
+import { ClipboardPaste, Copy, RefreshCcw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { facebookService } from "@/services/facebook.service"
 import { FacebookBusiness, FacebookPage, SystemUser } from "@/types/facebook"
 
 type SourceMode = "system-user" | "account-user"
-type BusinessPageRow = FacebookPage & { businessId: string; businessName: string }
+type BusinessPageRow = FacebookPage & {
+  businessId: string
+  businessName: string
+  pageSource: "owned" | "client"
+}
 type LatestResponseItem = {
   pageId: string
   pageName: string
@@ -35,9 +39,26 @@ export default function PageManager() {
   const [loadingData, setLoadingData] = useState(false)
   const [businesses, setBusinesses] = useState<FacebookBusiness[]>([])
   const [businessPages, setBusinessPages] = useState<BusinessPageRow[]>([])
+  const [assignedPageIdsByBusiness, setAssignedPageIdsByBusiness] = useState<Record<string, string[]>>({})
   const [allManagedPages, setAllManagedPages] = useState<FacebookPage[]>([])
   const [outsidePages, setOutsidePages] = useState<FacebookPage[]>([])
+  const [activeViewerId, setActiveViewerId] = useState("")
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([])
+  const [outsideSelectedPageIds, setOutsideSelectedPageIds] = useState<string[]>([])
+  const [bmAllSelectedPageIds, setBmAllSelectedPageIds] = useState<Record<string, string[]>>({})
+  const [bmAssignedSelectedPageIds, setBmAssignedSelectedPageIds] = useState<Record<string, string[]>>({})
+  const [pushedPageIdsInput, setPushedPageIdsInput] = useState("")
+  const [bulkSourceBmId, setBulkSourceBmId] = useState("")
+  const [bulkActionType, setBulkActionType] = useState<
+    "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm"
+  >("add-current-bm")
+  const [bulkTargetUserMode, setBulkTargetUserMode] = useState<"system-user" | "manual">("system-user")
+  const [systemUserAssignTaskMode, setSystemUserAssignTaskMode] = useState<"basic" | "manager">("basic")
+  const [bulkTargetSystemUserId, setBulkTargetSystemUserId] = useState("")
+  const [bulkBmSystemUsers, setBulkBmSystemUsers] = useState<Array<{ id: string; name: string; role?: string }>>([])
+  const [bulkBmSystemUsersLoading, setBulkBmSystemUsersLoading] = useState(false)
+  const [bulkTargetBmId, setBulkTargetBmId] = useState("")
+  const [bulkTargetUserId, setBulkTargetUserId] = useState("")
   const [latestResponses, setLatestResponses] = useState<LatestResponseItem[]>([])
   const [hasLatestResponseError, setHasLatestResponseError] = useState(false)
 
@@ -47,8 +68,15 @@ export default function PageManager() {
     () => systemUsers.filter((user) => String(user.role || "").toLowerCase() === "admin"),
     [systemUsers]
   )
+  const filteredAdminSystemUsers = useMemo(() => {
+    const selectedAppName = String(selectedSystemUser?.appName || "").trim().toLowerCase()
+    if (!selectedAppName) return adminSystemUsers
+    return adminSystemUsers.filter(
+      (user) => String(user.appName || "").trim().toLowerCase() === selectedAppName
+    )
+  }, [adminSystemUsers, selectedSystemUser?.appName])
   const selectedAdminSystemUser =
-    selectedAdminUserIndex !== "" ? adminSystemUsers[Number(selectedAdminUserIndex)] : undefined
+    selectedAdminUserIndex !== "" ? filteredAdminSystemUsers[Number(selectedAdminUserIndex)] : undefined
   const effectiveAdminSystemUser = selectedAdminSystemUser ?? selectedSystemUser
   const activeToken = useMemo(() => {
     if (!isAdminVerified) return ""
@@ -57,11 +85,28 @@ export default function PageManager() {
   }, [isAdminVerified, mode, selectedSystemUser?.token, accountTokenInput])
   const businessRows = useMemo(
     () =>
-      businesses.map((bm) => ({
-        ...bm,
-        pages: businessPages.filter((page) => page.businessId === bm.id),
-      })),
-    [businesses, businessPages]
+      businesses.map((bm) => {
+        const bmPages = businessPages.filter((page) => page.businessId === bm.id)
+        const assignedIdSet = new Set(assignedPageIdsByBusiness[bm.id] ?? [])
+        const managedIdSet = new Set(allManagedPages.map((page) => page.id))
+
+        return {
+          ...bm,
+          pages: bmPages,
+          // Match strictly by page id only.
+          // Prefer BM-specific assignment; fallback to globally managed ids for visibility.
+          assignedPages: bmPages
+            .filter((page) => assignedIdSet.has(page.id) || managedIdSet.has(page.id))
+            .map((page) => ({
+              id: page.id,
+              name: page.name,
+              category: page.category,
+              access_token: "",
+            })),
+        }
+      })
+      .sort((a, b) => b.pages.length - a.pages.length),
+    [businesses, businessPages, assignedPageIdsByBusiness, allManagedPages]
   )
   const allPageIds = useMemo(() => allManagedPages.map((page) => page.id), [allManagedPages])
   const isAllSelected = allPageIds.length > 0 && allPageIds.every((id) => selectedPageIds.includes(id))
@@ -73,6 +118,83 @@ export default function PageManager() {
     () => latestResponses.filter((item) => item.status === "failed"),
     [latestResponses]
   )
+  const selectedBulkSourceBm = useMemo(
+    () => businessRows.find((bm) => bm.id === bulkSourceBmId),
+    [businessRows, bulkSourceBmId]
+  )
+  const adminBusinessRows = useMemo(
+    () =>
+      businessRows.filter((bm) =>
+        (bm.permitted_roles ?? []).some((role) => String(role).toLowerCase() === "admin")
+      ),
+    [businessRows]
+  )
+  const allowedBulkActions = useMemo(() => {
+    if (!selectedBulkSourceBm) {
+      return [] as Array<{ value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm"; label: string }>
+    }
+
+    const roles = (selectedBulkSourceBm.permitted_roles ?? []).map((role) => String(role).toLowerCase())
+    const isAdmin = roles.includes("admin")
+
+    if (isAdmin) {
+      return [
+        { value: "share-other-bm", label: "Share to other BM" },
+        { value: "add-current-bm", label: "Add to current BM" },
+        { value: "assign-user-current-bm", label: "Assign to user in current BM" },
+        { value: "remove-user-current-bm", label: "Remove from user in current BM" },
+        { value: "remove-page-current-bm", label: "Remove page from current BM" },
+      ] as Array<{ value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm"; label: string }>
+    }
+
+    return [] as Array<{ value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm"; label: string }>
+  }, [selectedBulkSourceBm])
+
+  useEffect(() => {
+    if (!allowedBulkActions.some((action) => action.value === bulkActionType)) {
+      setBulkActionType(allowedBulkActions[0]?.value ?? "add-current-bm")
+    }
+  }, [allowedBulkActions, bulkActionType])
+
+  useEffect(() => {
+    if (
+      mode !== "account-user" ||
+      !isAdminVerified ||
+      !activeToken ||
+      !bulkSourceBmId ||
+      bulkTargetUserMode !== "system-user"
+    ) {
+      setBulkBmSystemUsers([])
+      setBulkTargetSystemUserId("")
+      setBulkBmSystemUsersLoading(false)
+      return
+    }
+
+    let active = true
+    setBulkBmSystemUsersLoading(true)
+    void facebookService
+      .getBusinessSystemUsers(activeToken, bulkSourceBmId)
+      .then((users) => {
+        if (!active) return
+        setBulkBmSystemUsers(users)
+        setBulkTargetSystemUserId((prev) =>
+          users.some((user) => user.id === prev) ? prev : ""
+        )
+      })
+      .catch(() => {
+        if (!active) return
+        setBulkBmSystemUsers([])
+        setBulkTargetSystemUserId("")
+      })
+      .finally(() => {
+        if (!active) return
+        setBulkBmSystemUsersLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [mode, isAdminVerified, activeToken, bulkSourceBmId, bulkTargetUserMode])
 
   const loadSystemUsers = async (password: string) => {
     const res = await fetch("/api/database/systemUsers/secure-list", {
@@ -93,10 +215,21 @@ export default function PageManager() {
     })
     setSelectedAdminUserIndex((prev) => {
       const index = Number(prev)
-      return Number.isInteger(index) && index >= 0 && index < users.length ? prev : ""
+      return Number.isInteger(index) && index >= 0 && index < filteredAdminSystemUsers.length
+        ? prev
+        : ""
     })
     return users
   }
+
+  useEffect(() => {
+    setSelectedAdminUserIndex((prev) => {
+      const index = Number(prev)
+      return Number.isInteger(index) && index >= 0 && index < filteredAdminSystemUsers.length
+        ? prev
+        : ""
+    })
+  }, [filteredAdminSystemUsers])
 
   const handleVerifyAdmin = async () => {
     const password = adminPasswordInput.trim()
@@ -122,8 +255,13 @@ export default function PageManager() {
       setAccountTokenInput("")
       setBusinesses([])
       setBusinessPages([])
+      setAssignedPageIdsByBusiness({})
       setOutsidePages([])
       setAllManagedPages([])
+      setActiveViewerId("")
+      setOutsideSelectedPageIds([])
+      setBmAllSelectedPageIds({})
+      setBmAssignedSelectedPageIds({})
       setStatus("Please enter admin password first.")
       setAuthError(message)
       toast.error(message)
@@ -153,7 +291,14 @@ export default function PageManager() {
 
   const handleDeleteSelectedPages = async () => {
     if (selectedPageIds.length === 0) return
-    if (mode !== "system-user") return
+    if (mode !== "system-user") {
+      if (!activeViewerId || !activeToken) {
+        toast.error("Missing account user context")
+        return
+      }
+      await deleteByUserTokenLegacy(selectedPageIds, activeViewerId, activeToken)
+      return
+    }
 
     const userId = selectedSystemUser?.id
     const targetBusinessId = selectedSystemUser?.businessId
@@ -165,6 +310,40 @@ export default function PageManager() {
     await deleteBySystemAdmin(userId, targetBusinessId)
   }
 
+  const deleteByUserToken = async (selectedIds: string[], userId: string, token: string) => {
+    try {
+      setLoadingData(true)
+      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatch(
+        selectedIds,
+        userId,
+        token
+      )
+      applyDeleteResult(selectedIds, result)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      applyDeleteError(selectedIds, message)
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
+  const deleteByUserTokenLegacy = async (selectedIds: string[], userId: string, token: string) => {
+    try {
+      setLoadingData(true)
+      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatchLegacy(
+        selectedIds,
+        userId,
+        token
+      )
+      applyDeleteResult(selectedIds, result)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      applyDeleteError(selectedIds, message)
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
   const applyDeleteResult = (
     selectedIds: string[],
     result: { successPageIds: string[]; failed: Array<{ pageId: string; message: string }> }
@@ -172,6 +351,17 @@ export default function PageManager() {
     const pageNameMap = new Map(allManagedPages.map((page) => [page.id, page.name]))
     setAllManagedPages((prev) => prev.filter((page) => !result.successPageIds.includes(page.id)))
     setSelectedPageIds((prev) => prev.filter((id) => !result.successPageIds.includes(id)))
+    setOutsideSelectedPageIds((prev) => prev.filter((id) => !result.successPageIds.includes(id)))
+    setBmAllSelectedPageIds((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([key, ids]) => [key, ids.filter((id) => !result.successPageIds.includes(id))])
+      )
+    )
+    setBmAssignedSelectedPageIds((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([key, ids]) => [key, ids.filter((id) => !result.successPageIds.includes(id))])
+      )
+    )
 
     const failedMap = new Map(result.failed.map((item) => [item.pageId, item.message]))
     const responses = selectedIds.map((pageId) => {
@@ -206,6 +396,240 @@ export default function PageManager() {
     toast.error(message)
   }
 
+  const applyAssignResult = (
+    selectedIds: string[],
+    result: { successPageIds: string[]; failed: Array<{ pageId: string; message: string }> }
+  ) => {
+    const pageNameMap = new Map(allManagedPages.map((page) => [page.id, page.name]))
+    const businessPageMap = new Map(businessPages.map((page) => [page.id, page]))
+
+    if (result.successPageIds.length > 0) {
+      setAllManagedPages((prev) => {
+        const existing = new Set(prev.map((page) => page.id))
+        const additions = result.successPageIds
+          .map((id) => businessPageMap.get(id))
+          .filter((item): item is BusinessPageRow => Boolean(item))
+          .filter((item) => !existing.has(item.id))
+          .map((item) => ({
+            id: item.id,
+            name: item.name,
+            category: item.category,
+            access_token: "",
+          }))
+        return [...prev, ...additions]
+      })
+    }
+
+    const failedMap = new Map(result.failed.map((item) => [item.pageId, item.message]))
+    const responses = selectedIds.map((pageId) => {
+      const failedMessage = failedMap.get(pageId)
+      const fallbackName = businessPageMap.get(pageId)?.name || "-"
+      return {
+        pageId,
+        pageName: pageNameMap.get(pageId) || fallbackName,
+        status: failedMessage ? "failed" : "success",
+        message: failedMessage ? failedMessage : "Permission assigned successfully",
+      } satisfies LatestResponseItem
+    })
+
+    setLatestResponses(responses)
+    setHasLatestResponseError(result.failed.length > 0)
+
+    if (result.failed.length === 0) {
+      toast.success(`Assigned ${result.successPageIds.length} page permission(s)`)
+    } else {
+      toast.error(`Assigned ${result.successPageIds.length}, failed ${result.failed.length}`)
+    }
+  }
+
+  const applyAssignError = (selectedIds: string[], message: string) => {
+    const fallbackResponses = selectedIds.map((pageId) => ({
+      pageId,
+      pageName: businessPages.find((page) => page.id === pageId)?.name || "-",
+      status: "failed" as const,
+      message,
+    }))
+    setLatestResponses(fallbackResponses)
+    setHasLatestResponseError(true)
+    toast.error(message)
+  }
+
+  const applyAddToBusinessResult = (
+    selectedIds: string[],
+    result: { successPageIds: string[]; failed: Array<{ pageId: string; message: string }> }
+  ) => {
+    const pageNameMap = new Map(businessPages.map((page) => [page.id, page.name]))
+    const failedMap = new Map(result.failed.map((item) => [item.pageId, item.message]))
+    const responses = selectedIds.map((pageId) => {
+      const failedMessage = failedMap.get(pageId)
+      return {
+        pageId,
+        pageName: pageNameMap.get(pageId) || "-",
+        status: failedMessage ? "failed" : "success",
+        message: failedMessage ? failedMessage : "Page added into business successfully",
+      } satisfies LatestResponseItem
+    })
+
+    setLatestResponses(responses)
+    setHasLatestResponseError(result.failed.length > 0)
+
+    if (result.failed.length === 0) {
+      toast.success(`Added ${result.successPageIds.length} page(s) into business`)
+    } else {
+      toast.error(`Added ${result.successPageIds.length}, failed ${result.failed.length}`)
+    }
+  }
+
+  const applyAddToBusinessError = (selectedIds: string[], message: string) => {
+    const pageNameMap = new Map(businessPages.map((page) => [page.id, page.name]))
+    setLatestResponses(
+      selectedIds.map((pageId) => ({
+        pageId,
+        pageName: pageNameMap.get(pageId) || "-",
+        status: "failed" as const,
+        message,
+      }))
+    )
+    setHasLatestResponseError(true)
+    toast.error(message)
+  }
+
+  const addPagesToBusiness = async (selectedIds: string[], businessId: string, token: string) => {
+    try {
+      setLoadingData(true)
+      const result = await facebookService.addPagesToBusinessOwnedPagesBatch(
+        selectedIds,
+        businessId,
+        token
+      )
+      applyAddToBusinessResult(selectedIds, result)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      applyAddToBusinessError(selectedIds, message)
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
+  const removePagesFromBusiness = async (selectedIds: string[], businessId: string, token: string) => {
+    try {
+      setLoadingData(true)
+      const result = await facebookService.removePagesFromBusinessBatch(
+        selectedIds,
+        businessId,
+        token
+      )
+      const pageNameMap = new Map(businessPages.map((page) => [page.id, page.name]))
+      setLatestResponses(
+        selectedIds.map((pageId) => {
+          const failedMessage = result.failed.find((item) => item.pageId === pageId)?.message
+          return {
+            pageId,
+            pageName: pageNameMap.get(pageId) || "-",
+            status: failedMessage ? "failed" : "success",
+            message: failedMessage || "Page removed from business successfully",
+          } satisfies LatestResponseItem
+        })
+      )
+      setHasLatestResponseError(result.failed.length > 0)
+      if (result.failed.length === 0) {
+        toast.success(`Removed ${result.successPageIds.length} page(s) from business`)
+      } else {
+        toast.error(`Removed ${result.successPageIds.length}, failed ${result.failed.length}`)
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      const pageNameMap = new Map(businessPages.map((page) => [page.id, page.name]))
+      setLatestResponses(
+        selectedIds.map((pageId) => ({
+          pageId,
+          pageName: pageNameMap.get(pageId) || "-",
+          status: "failed" as const,
+          message,
+        }))
+      )
+      setHasLatestResponseError(true)
+      toast.error(message)
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
+  const sharePagesToOtherBusiness = async (
+    selectedIds: string[],
+    targetBusinessId: string,
+    token: string,
+    taskMode: "basic" | "manager"
+  ) => {
+    try {
+      setLoadingData(true)
+      const result = await facebookService.sharePagesToBusinessByAgencies(
+        selectedIds,
+        targetBusinessId,
+        token,
+        taskMode
+      )
+      const pageNameMap = new Map(businessPages.map((page) => [page.id, page.name]))
+      setLatestResponses(
+        selectedIds.map((pageId) => {
+          const failedMessage = result.failed.find((item) => item.pageId === pageId)?.message
+          return {
+            pageId,
+            pageName: pageNameMap.get(pageId) || "-",
+            status: failedMessage ? "failed" : "success",
+            message: failedMessage || "Page shared to target business successfully",
+          } satisfies LatestResponseItem
+        })
+      )
+      setHasLatestResponseError(result.failed.length > 0)
+      if (result.failed.length === 0) {
+        toast.success(`Shared ${result.successPageIds.length} page(s) to target business`)
+      } else {
+        toast.error(`Shared ${result.successPageIds.length}, failed ${result.failed.length}`)
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      const pageNameMap = new Map(businessPages.map((page) => [page.id, page.name]))
+      setLatestResponses(
+        selectedIds.map((pageId) => ({
+          pageId,
+          pageName: pageNameMap.get(pageId) || "-",
+          status: "failed" as const,
+          message,
+        }))
+      )
+      setHasLatestResponseError(true)
+      toast.error(message)
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
+  const assignByUserToken = async (
+    selectedIds: string[],
+    businessId: string,
+    userId: string,
+    token: string,
+    taskMode: "basic" | "manager" = "basic"
+  ) => {
+    try {
+      setLoadingData(true)
+      const result = await facebookService.assignUserToPagesByBusinessAssignedUsersBatch(
+        selectedIds,
+        businessId,
+        userId,
+        token,
+        taskMode
+      )
+      applyAssignResult(selectedIds, result)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      applyAssignError(selectedIds, message)
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
   const deleteBySystemAdmin = async (userId: string, businessId: string) => {
     const adminToken = effectiveAdminSystemUser?.token || ""
     if (!adminToken) {
@@ -216,7 +640,7 @@ export default function PageManager() {
     try {
       setLoadingData(true)
       const selectedIds = [...selectedPageIds]
-      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatch(
+      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatchLegacy(
         selectedIds,
         userId,
         adminToken
@@ -248,6 +672,111 @@ export default function PageManager() {
     await copy(lines.join("\n"))
   }
 
+  const handlePushPageIds = async () => {
+    try {
+      const clipboardText = await navigator.clipboard.readText()
+      const trimmed = clipboardText.trim()
+      if (!trimmed) {
+        toast.error("Clipboard is empty")
+        return
+      }
+      setPushedPageIdsInput((prev) => {
+        const current = prev.trim()
+        if (!current) return trimmed
+        return `${prev}\n${trimmed}`
+      })
+      toast.success("Pushed clipboard text into area")
+    } catch {
+      toast.error("Unable to read clipboard")
+    }
+  }
+
+  const handleClearPushedPageIds = () => {
+    setPushedPageIdsInput("")
+    toast.success("Cleared page ids area")
+  }
+
+  const getBulkPageIds = () =>
+    pushedPageIdsInput
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+  const executeBulkAction = async () => {
+    const ids = getBulkPageIds()
+    if (ids.length === 0) {
+      toast.error("Please input page ids, one per line")
+      return
+    }
+    if (!activeToken || !activeViewerId) {
+      toast.error("Missing account user context")
+      return
+    }
+    if (!bulkSourceBmId) {
+      toast.error("Please select source BM")
+      return
+    }
+
+    const resolvedTaskMode: "basic" | "manager" = systemUserAssignTaskMode
+
+    if (bulkActionType === "add-current-bm") {
+      const sourceBm = businessRows.find((bm) => bm.id === bulkSourceBmId)
+      const existingIdSet = new Set((sourceBm?.pages ?? []).map((page) => page.id))
+      const idsToAdd = ids.filter((id) => !existingIdSet.has(id))
+      const skippedCount = ids.length - idsToAdd.length
+
+      if (idsToAdd.length === 0) {
+        toast.error("All input page ids already exist in this BM")
+        return
+      }
+
+      if (skippedCount > 0) {
+        toast.message(`Skipped ${skippedCount} existing page id(s)`)
+      }
+
+      await addPagesToBusiness(idsToAdd, bulkSourceBmId, activeToken)
+      return
+    }
+
+    if (bulkActionType === "assign-user-current-bm") {
+      const resolvedTargetUserId =
+        bulkTargetUserMode === "system-user" ? bulkTargetSystemUserId.trim() : bulkTargetUserId.trim()
+      const targetUser = resolvedTargetUserId
+      if (!targetUser) {
+        toast.error("Please input target user id")
+        return
+      }
+      await assignByUserToken(ids, bulkSourceBmId, targetUser, activeToken, resolvedTaskMode)
+      return
+    }
+
+    if (bulkActionType === "remove-user-current-bm") {
+      const resolvedTargetUserId =
+        bulkTargetUserMode === "system-user" ? bulkTargetSystemUserId.trim() : bulkTargetUserId.trim()
+      const targetUser = resolvedTargetUserId
+      if (!targetUser) {
+        toast.error("Please input target user id")
+        return
+      }
+      await deleteByUserToken(ids, targetUser, activeToken)
+      return
+    }
+
+    if (bulkActionType === "remove-page-current-bm") {
+      await removePagesFromBusiness(ids, bulkSourceBmId, activeToken)
+      return
+    }
+
+    if (bulkActionType === "share-other-bm") {
+      const targetBm = bulkTargetBmId.trim()
+      if (!targetBm) {
+        toast.error("Please input target BM id")
+        return
+      }
+      await sharePagesToOtherBusiness(ids, targetBm, activeToken, resolvedTaskMode)
+    }
+  }
+
   const crawlPages = async (token: string) => {
     try {
       setLoadingData(true)
@@ -259,7 +788,7 @@ export default function PageManager() {
         facebookService.getPages(token),
       ])
 
-      const bmWithRoles = await Promise.all(
+      const bmWithRoles = await Promise.allSettled(
         bmList.map(async (bm) => {
           const assignedRoles = await facebookService.getBusinessRolesForUser(token, bm.id, me.id)
           return {
@@ -269,32 +798,90 @@ export default function PageManager() {
         })
       )
 
-      const bmPageGroups = await Promise.all(
-        bmWithRoles.map(async (bm) => {
-          const pages = await facebookService.getBusinessPages(token, bm.id)
-          return pages.map((page) => ({
-            ...page,
+      const normalizedBusinesses = bmWithRoles.map((item, index) => {
+        if (item.status === "fulfilled") return item.value
+        const fallback = bmList[index]
+        return {
+          ...fallback,
+          permitted_roles: fallback.permitted_roles ?? [],
+        }
+      })
+
+      const bmPageGroups = await Promise.allSettled(
+        normalizedBusinesses.map(async (bm) => {
+          const [ownedPages, clientPages] = await Promise.all([
+            facebookService.getBusinessPages(token, bm.id),
+            facebookService.getBusinessClientPages(token, bm.id).catch(() => []),
+          ])
+          const uniquePages = Array.from(
+            new Map([...ownedPages, ...clientPages].map((page) => [page.id, page])).values()
+          )
+          return {
+            bm,
+            pages: uniquePages.map((page) => ({
+              ...page,
+              businessId: bm.id,
+              businessName: bm.name,
+              pageSource: ownedPages.some((owned) => owned.id === page.id) ? "owned" : "client",
+            })),
+          }
+        })
+      )
+      const bmAssignedGroups = await Promise.allSettled(
+        normalizedBusinesses.map(async (bm) => {
+          const pagesInBm = flattenedBmPages
+            .filter((page) => page.businessId === bm.id)
+            .map((page) => page.id)
+          const assignedPageIds =
+            pagesInBm.length > 0
+              ? await facebookService.getAssignedPageIdsInBusinessBatch(
+                  token,
+                  bm.id,
+                  me.id,
+                  pagesInBm
+                )
+              : []
+
+          return {
             businessId: bm.id,
-            businessName: bm.name,
-          }))
+            assignedPageIds,
+          }
         })
       )
 
-      const flattenedBmPages = bmPageGroups.flat()
+      const flattenedBmPages = bmPageGroups
+        .filter((item): item is PromiseFulfilledResult<{ bm: FacebookBusiness; pages: BusinessPageRow[] }> => item.status === "fulfilled")
+        .flatMap((item) => item.value.pages)
       const bmPageIdSet = new Set(flattenedBmPages.map((item) => item.id))
       const pagesOutsideBm = managedPages.filter((page) => !bmPageIdSet.has(page.id))
+      const nextAssignedByBusiness: Record<string, string[]> = {}
+      for (const item of bmAssignedGroups) {
+        if (item.status === "fulfilled") {
+          nextAssignedByBusiness[item.value.businessId] = item.value.assignedPageIds
+        }
+      }
 
-      setBusinesses(bmWithRoles)
+      setBusinesses(normalizedBusinesses)
       setBusinessPages(flattenedBmPages)
+      setAssignedPageIdsByBusiness(nextAssignedByBusiness)
       setAllManagedPages(managedPages)
       setOutsidePages(pagesOutsideBm)
+      setActiveViewerId(me.id)
+      setOutsideSelectedPageIds([])
+      setBmAllSelectedPageIds({})
+      setBmAssignedSelectedPageIds({})
       setStatus("Crawl success.")
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unknown error"
       setBusinesses([])
       setBusinessPages([])
+      setAssignedPageIdsByBusiness({})
       setAllManagedPages([])
       setOutsidePages([])
+      setActiveViewerId("")
+      setOutsideSelectedPageIds([])
+      setBmAllSelectedPageIds({})
+      setBmAssignedSelectedPageIds({})
       setStatus("Unable to crawl pages. Please check token permissions.")
       toast.error(message)
     } finally {
@@ -306,16 +893,26 @@ export default function PageManager() {
     if (!isAdminVerified) {
       setBusinesses([])
       setBusinessPages([])
+      setAssignedPageIdsByBusiness({})
       setAllManagedPages([])
       setOutsidePages([])
+      setActiveViewerId("")
+      setOutsideSelectedPageIds([])
+      setBmAllSelectedPageIds({})
+      setBmAssignedSelectedPageIds({})
       return
     }
 
     if (!activeToken) {
       setBusinesses([])
       setBusinessPages([])
+      setAssignedPageIdsByBusiness({})
       setAllManagedPages([])
       setOutsidePages([])
+      setActiveViewerId("")
+      setOutsideSelectedPageIds([])
+      setBmAllSelectedPageIds({})
+      setBmAssignedSelectedPageIds({})
       setStatus("Select source and token to auto crawl pages.")
       return
     }
@@ -330,6 +927,83 @@ export default function PageManager() {
   useEffect(() => {
     setSelectedPageIds((prev) => prev.filter((id) => allPageIds.includes(id)))
   }, [allPageIds])
+
+  const renderLatestResponseBlock = (
+    title: string,
+    data: Array<{ status: "success" | "failed"; message: string; id: string; name: string }>
+  ) => {
+    const successItems = data.filter((item) => item.status === "success")
+    const failedItems = data.filter((item) => item.status === "failed")
+
+    return (
+      <div
+        className={`space-y-2 rounded-xl p-3 backdrop-blur-[1px] ${
+          failedItems.length === 0
+            ? "border border-emerald-300 bg-white shadow-[0_0_0_1px_rgba(16,185,129,0.15),0_0_20px_rgba(16,185,129,0.22)]"
+            : successItems.length === 0
+              ? "border border-red-300 bg-white shadow-[0_0_0_1px_rgba(248,113,113,0.15),0_0_20px_rgba(248,113,113,0.22)]"
+              : "border border-amber-200 bg-white shadow-[0_0_0_1px_rgba(251,191,36,0.10),0_0_16px_rgba(251,191,36,0.14)]"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium text-slate-700">{title}</p>
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => {
+              const lines = data.map((item) => {
+                const label = item.status === "success" ? "SUCCESS" : "FAILED"
+                return `[${label}] ${item.id} (${item.name}): ${item.message}`
+              })
+              void copy(lines.join("\n"))
+            }}
+            disabled={data.length === 0}
+            className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50 disabled:cursor-not-allowed"
+            title="Copy latest response"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <p
+          className={`text-xs ${
+            failedItems.length === 0
+              ? "text-emerald-700"
+              : successItems.length === 0
+                ? "text-red-600"
+                : "text-amber-700"
+          }`}
+        >
+          {failedItems.length === 0
+            ? `All items succeeded. Success: ${successItems.length}.`
+            : successItems.length === 0
+              ? `All items failed. Failed: ${failedItems.length}.`
+              : `Some items failed. Success: ${successItems.length}, Failed: ${failedItems.length}.`}
+        </p>
+        <div className="max-h-60 overflow-y-auto">
+          {failedItems.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 text-xs text-slate-600 marker:text-red-500">
+              {failedItems.map((item, index) => (
+                <li key={`failed-${item.id}-${index}`}>
+                  <span className="font-mono font-semibold text-slate-800">{item.id}</span> ({item.name}):{" "}
+                  <span className="text-red-500">{item.message}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {successItems.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 pt-2 text-xs text-slate-600 marker:text-emerald-600">
+              {successItems.map((item, index) => (
+                <li key={`success-${item.id}-${index}`}>
+                  <span className="font-mono font-semibold text-slate-800">{item.id}</span> ({item.name}):{" "}
+                  <span className="text-emerald-700">{item.message}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
@@ -444,7 +1118,7 @@ export default function PageManager() {
                     className="h-8 w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 pr-10 text-xs shadow-sm [background-position:right_0.7rem_center] disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
                     disabled={
                       !isAdminVerified ||
-                      adminSystemUsers.length === 0 ||
+                      filteredAdminSystemUsers.length === 0 ||
                       selectedPageIds.length === 0
                     }
                   >
@@ -453,11 +1127,11 @@ export default function PageManager() {
                         ? "Please enter admin password first"
                         : selectedPageIds.length === 0
                           ? "Select pages in the table first"
-                          : adminSystemUsers.length === 0
-                          ? "No admin system users"
+                          : filteredAdminSystemUsers.length === 0
+                          ? "No admin system users with same app"
                           : "Select system admin"}
                     </option>
-                    {adminSystemUsers.map((user, index) => (
+                    {filteredAdminSystemUsers.map((user, index) => (
                       <option key={`admin-${index}`} value={String(index)}>
                         {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
                       </option>
@@ -487,6 +1161,17 @@ export default function PageManager() {
                 title="Copy input token"
               >
                 <Copy className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRefreshPages}
+                disabled={loadingData || !accountTokenInput.trim()}
+                className="h-10 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50"
+                title="Refresh pages"
+              >
+                <RefreshCcw className={`mr-1 h-3.5 w-3.5 ${loadingData ? "animate-spin" : ""}`} />
+                Refresh
               </Button>
             </div>
           )}
@@ -674,38 +1359,224 @@ export default function PageManager() {
             </div>
           ) : (
             <>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold tracking-tight">All Pages</h3>
-                  <p className="text-sm text-slate-600">Pages: {allManagedPages.length}</p>
+              {latestResponses.length > 0 &&
+                renderLatestResponseBlock(
+                  "Latest Response",
+                  latestResponses.map((item) => ({
+                    status: item.status,
+                    message: item.message,
+                    id: item.pageId,
+                    name: item.pageName,
+                  }))
+                )}
+              <div className="grid grid-cols-1 items-stretch gap-3 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-[1.5fr_1fr]">
+                <div className="flex h-full flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-slate-700">Page IDs Area</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void copy(pushedPageIdsInput)}
+                        disabled={!pushedPageIdsInput.trim()}
+                        className="h-8 cursor-pointer border-emerald-200 bg-white px-3 text-xs text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:text-emerald-300"
+                      >
+                        <Copy className="mr-1 h-3.5 w-3.5" />
+                        Copy
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handlePushPageIds()}
+                        className="h-8 cursor-pointer border-blue-200 bg-white px-3 text-xs text-blue-700 hover:bg-blue-50 hover:text-blue-800 disabled:cursor-not-allowed disabled:text-blue-300"
+                      >
+                        <ClipboardPaste className="mr-1 h-3.5 w-3.5" />
+                        Paste
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleClearPushedPageIds}
+                        disabled={!pushedPageIdsInput.trim()}
+                        className="h-8 cursor-pointer border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                      >
+                        <Trash2 className="mr-1 h-3.5 w-3.5" />
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
+                  <textarea
+                    value={pushedPageIdsInput}
+                    onChange={(e) => setPushedPageIdsInput(e.target.value)}
+                    placeholder={"Input page ids, one per line\nExample:\n1234567890\n9988776655"}
+                    className="h-full min-h-28 w-full flex-1 resize-y rounded-md border border-slate-300 p-2 text-xs outline-none ring-0 focus:border-slate-400"
+                  />
                 </div>
-                <p className="text-sm text-slate-600">
-                  Account User mode: shows BM access list, pages inside BM, and pages assigned outside BM.
-                </p>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-slate-700">Actions</p>
+                  <select
+                    value={bulkSourceBmId}
+                    onChange={(e) => setBulkSourceBmId(e.target.value)}
+                    className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
+                  >
+                    <option value="">
+                      {adminBusinessRows.length > 0 ? "Select source BM (admin only)" : "No admin BM available"}
+                    </option>
+                    {adminBusinessRows.map((bm) => (
+                      <option key={`bulk-source-${bm.id}`} value={bm.id}>
+                        {bm.name} - {bm.id}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={bulkActionType}
+                    onChange={(e) =>
+                      setBulkActionType(
+                        e.target.value as
+                          | "share-other-bm"
+                          | "add-current-bm"
+                          | "assign-user-current-bm"
+                          | "remove-user-current-bm"
+                          | "remove-page-current-bm"
+                      )
+                    }
+                    className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
+                    disabled={!bulkSourceBmId || allowedBulkActions.length === 0}
+                  >
+                    {allowedBulkActions.length === 0 ? (
+                      <option value="">No actions (admin BM only)</option>
+                    ) : (
+                      allowedBulkActions.map((action) => (
+                        <option key={`bulk-action-${action.value}`} value={action.value}>
+                          {action.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  {bulkActionType === "share-other-bm" && (
+                    <Input
+                      value={bulkTargetBmId}
+                      onChange={(e) => setBulkTargetBmId(e.target.value)}
+                      placeholder="Target BM ID"
+                      className="h-9 text-xs"
+                    />
+                  )}
+                  {bulkActionType !== "add-current-bm" &&
+                    bulkActionType !== "remove-page-current-bm" &&
+                    bulkActionType !== "share-other-bm" && (
+                    <div className="space-y-2">
+                      <select
+                        value={bulkTargetUserMode}
+                        onChange={(e) => setBulkTargetUserMode(e.target.value as "system-user" | "manual")}
+                        className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
+                      >
+                        <option value="system-user">Target from system users</option>
+                        <option value="manual">Target by manual ID</option>
+                      </select>
+                      {bulkTargetUserMode === "system-user" ? (
+                        <select
+                          value={bulkTargetSystemUserId}
+                          onChange={(e) => setBulkTargetSystemUserId(e.target.value)}
+                          className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
+                        >
+                          <option value="">
+                            {bulkBmSystemUsersLoading
+                              ? "Loading system users..."
+                              : bulkBmSystemUsers.length > 0
+                              ? "Select target system user"
+                              : "No system users in selected BM"}
+                          </option>
+                          {bulkBmSystemUsers.map((user, index) => (
+                            <option key={`target-system-user-${index}`} value={user.id}>
+                              {`${user.name} • ${user.role || "(no-role)"} • ${user.id}`}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <Input
+                          value={bulkTargetUserId}
+                          onChange={(e) => setBulkTargetUserId(e.target.value)}
+                          placeholder="Target User ID"
+                          className="h-9 text-xs"
+                        />
+                      )}
+                    </div>
+                  )}
+                  {(bulkActionType === "assign-user-current-bm" || bulkActionType === "share-other-bm") && (
+                    <select
+                      value={systemUserAssignTaskMode}
+                      onChange={(e) => setSystemUserAssignTaskMode(e.target.value as "basic" | "manager")}
+                      className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
+                    >
+                      <option value="basic">
+                        basic: CREATE_CONTENT, MODERATE, ADVERTISE, ANALYZE
+                      </option>
+                      <option value="manager">
+                        manager: MANAGE, CREATE_CONTENT, MODERATE, ADVERTISE, ANALYZE
+                      </option>
+                    </select>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void executeBulkAction()}
+                    disabled={!pushedPageIdsInput.trim() || !bulkSourceBmId || allowedBulkActions.length === 0 || loadingData}
+                    className="h-9 w-full cursor-pointer border-slate-300 bg-slate-50 px-3 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed"
+                  >
+                    Run Action
+                  </Button>
+                  <p className="text-[11px] text-slate-500">
+                    IDs are read line-by-line. Use Push to preview selection, then Run Action.
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-3">
                 <h3 className="text-lg font-semibold tracking-tight">Business Managers</h3>
                 <div className="overflow-hidden rounded-xl border border-slate-200">
-                  <table className="w-full text-sm">
+                  <table className="w-full table-fixed text-sm">
                     <thead className="bg-slate-50">
                       <tr className="text-left font-semibold">
-                        <th className="p-3">#</th>
+                        <th className="w-[64px] p-3">#</th>
+                        <th className="w-[210px] p-3">BM ID</th>
                         <th className="p-3">BM Name</th>
-                        <th className="p-3">BM ID</th>
+                        <th className="w-[220px] p-3">Role</th>
+                        <th className="w-[120px] p-3">Total Pages</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {businesses.map((bm, index) => (
+                      {businessRows.map((bm, index) => (
                         <tr key={bm.id} className="border-t hover:bg-slate-50/60">
                           <td className="p-3">{index + 1}</td>
+                          <td className="w-[210px] p-3">
+                            <div className="flex w-full items-center justify-between gap-1">
+                              <span className="font-mono">{bm.id}</span>
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                onClick={() => copy(bm.id)}
+                                className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                                title="Copy BM id"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </td>
                           <td className="p-3">{bm.name}</td>
-                          <td className="p-3 font-mono">{bm.id}</td>
+                          <td className="p-3">
+                            {(bm.permitted_roles ?? [])
+                              .map((role) => {
+                                const normalized = String(role).toLowerCase()
+                                return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+                              })
+                              .join(", ") || "-"}
+                          </td>
+                          <td className="p-3">{bm.pages.length}</td>
                         </tr>
                       ))}
-                      {!loadingData && businesses.length === 0 && (
+                      {!loadingData && businessRows.length === 0 && (
                         <tr className="border-t">
-                          <td className="p-3 text-slate-500" colSpan={3}>
+                          <td className="p-3 text-slate-500" colSpan={5}>
                             No BM found for this access token.
                           </td>
                         </tr>
@@ -716,90 +1587,484 @@ export default function PageManager() {
               </div>
 
               <div className="space-y-3">
-                <h3 className="text-lg font-semibold tracking-tight">Pages In BM</h3>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-semibold tracking-tight">Pages Outside BM</h3>
+                    {outsidePages.length > 0 && (
+                      <p className="text-xs text-slate-600">
+                        pages: {outsidePages.length} selected:{" "}
+                        {outsideSelectedPageIds.length}
+                      </p>
+                    )}
+                  </div>
+                  {outsidePages.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const outsideSelectedIds = outsidePages
+                          .filter((page) => outsideSelectedPageIds.includes(page.id))
+                          .map((page) => page.id)
+                        if (outsideSelectedIds.length === 0) return
+                        void copy(outsideSelectedIds.join("\n"))
+                      }}
+                      disabled={outsideSelectedPageIds.length === 0}
+                      className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
+                    >
+                      <Copy className="mr-1 h-3.5 w-3.5" />
+                      Copy Selected
+                    </Button>
+                  )}
+                </div>
                 <div className="overflow-hidden rounded-xl border border-slate-200">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50">
-                      <tr className="text-left font-semibold">
-                        <th className="p-3">Business</th>
-                        <th className="p-3">#</th>
-                        <th className="p-3">Page ID</th>
-                        <th className="p-3">Page Name</th>
-                        <th className="p-3">Category</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {businessRows.map((bm) => (
-                        <Fragment key={`bm-group-${bm.id}`}>
-                          <tr key={`bm-${bm.id}`} className="border-t bg-slate-50/70">
-                            <td className="p-3 font-semibold">{bm.name}</td>
-                            <td className="p-3 text-slate-500" colSpan={4}>
-                              BM ID: <span className="font-mono">{bm.id}</span>
+                  <div className="max-h-[360px] overflow-y-auto">
+                    <table className="w-full table-fixed text-sm">
+                      <thead className="bg-slate-50">
+                        <tr className="text-left font-semibold">
+                          <th className="sticky top-0 z-10 w-[64px] bg-slate-50 p-3">#</th>
+                          <th className="sticky top-0 z-10 w-[210px] bg-slate-50 p-3">Page ID</th>
+                          <th className="sticky top-0 z-10 bg-slate-50 p-3">Page Name</th>
+                          <th className="sticky top-0 z-10 w-[180px] bg-slate-50 p-3">Category</th>
+                          <th className="sticky top-0 z-10 w-[72px] bg-slate-50 p-3 text-right">
+                            {outsidePages.length > 0 && (
+                              <input
+                                type="checkbox"
+                                checked={outsidePages.every((page) => outsideSelectedPageIds.includes(page.id))}
+                                onChange={(e) => {
+                                  const outsidePageIds = outsidePages.map((page) => page.id)
+                                  if (e.target.checked) {
+                                    setOutsideSelectedPageIds(outsidePageIds)
+                                  } else {
+                                    setOutsideSelectedPageIds([])
+                                  }
+                                }}
+                                className="h-4 w-4 cursor-pointer accent-slate-600"
+                                aria-label="Select all pages outside BM"
+                              />
+                            )}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {outsidePages.map((page, index) => (
+                          <tr
+                            key={`${page.id}-${index}`}
+                            className="border-t bg-emerald-50/40 hover:bg-emerald-50/70"
+                          >
+                            <td className="p-3">{index + 1}</td>
+                            <td className="p-3">
+                              <div className="flex w-full items-center justify-between gap-1">
+                                <span className="font-mono">{page.id}</span>
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  onClick={() => copy(page.id)}
+                                  className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                                  title="Copy page id"
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </td>
+                            <td className="p-3">{page.name}</td>
+                            <td className="p-3">{page.category || "-"}</td>
+                            <td className="p-3 text-right">
+                              <input
+                                type="checkbox"
+                                checked={outsideSelectedPageIds.includes(page.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setOutsideSelectedPageIds((prev) => [...new Set([...prev, page.id])])
+                                  } else {
+                                    setOutsideSelectedPageIds((prev) => prev.filter((id) => id !== page.id))
+                                  }
+                                }}
+                                className="h-4 w-4 cursor-pointer accent-slate-600"
+                                aria-label={`Select page ${page.name}`}
+                              />
                             </td>
                           </tr>
-                          {bm.pages.length === 0 && (
-                            <tr key={`bm-${bm.id}-empty`} className="border-t">
-                              <td className="p-3 text-slate-500">-</td>
-                              <td className="p-3 text-slate-500" colSpan={4}>
-                                No pages in this BM.
-                              </td>
-                            </tr>
-                          )}
-                          {bm.pages.map((row, index) => (
-                            <tr key={`${row.businessId}-${row.id}-${index}`} className="border-t hover:bg-slate-50/60">
-                              <td className="p-3 text-slate-500">{bm.name}</td>
-                              <td className="p-3">{index + 1}</td>
-                              <td className="p-3 font-mono">{row.id}</td>
-                              <td className="p-3">{row.name}</td>
-                              <td className="p-3">{row.category || "-"}</td>
-                            </tr>
-                          ))}
-                        </Fragment>
-                      ))}
-                      {!loadingData && businessPages.length === 0 && (
-                        <tr className="border-t">
-                          <td className="p-3 text-slate-500" colSpan={5}>
-                            No pages in BM.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                        ))}
+                        {!loadingData && outsidePages.length === 0 && (
+                          <tr className="border-t">
+                            <td className="p-3 text-slate-500" colSpan={5}>
+                              No pages outside BM.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <h3 className="text-lg font-semibold tracking-tight">Pages Outside BM</h3>
-                <div className="overflow-hidden rounded-xl border border-slate-200">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50">
-                      <tr className="text-left font-semibold">
-                        <th className="p-3">#</th>
-                        <th className="p-3">Page ID</th>
-                        <th className="p-3">Page Name</th>
-                        <th className="p-3">Category</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {outsidePages.map((page, index) => (
-                        <tr key={`${page.id}-${index}`} className="border-t hover:bg-slate-50/60">
-                          <td className="p-3">{index + 1}</td>
-                          <td className="p-3 font-mono">{page.id}</td>
-                          <td className="p-3">{page.name}</td>
-                          <td className="p-3">{page.category || "-"}</td>
-                        </tr>
-                      ))}
-                      {!loadingData && outsidePages.length === 0 && (
-                        <tr className="border-t">
-                          <td className="p-3 text-slate-500" colSpan={4}>
-                            No pages outside BM.
-                          </td>
-                        </tr>
+              {businessRows.length > 0 && (
+                <div className="space-y-8">
+                  {businessRows.map((bm) => {
+                    const rolesLower = (bm.permitted_roles ?? []).map((role) => String(role).toLowerCase())
+                    const canSeeAllPages = rolesLower.includes("admin")
+
+                    return (
+                  <div key={`bm-table-${bm.id}`} className="space-y-4">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-lg font-semibold tracking-tight">{bm.name}</h3>
+                        {canSeeAllPages && bm.pages.length > 0 ? (
+                          <p className="text-xs text-slate-600">
+                            role: {rolesLower.join(", ") || "-"}{" "}
+                            pages: {bm.pages.length} assigned: {bm.assignedPages.length} selected:{" "}
+                            {(bmAllSelectedPageIds[bm.id] ?? []).length}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-600">
+                            role: {rolesLower.join(", ") || "-"} assigned: {bm.assignedPages.length} selected:{" "}
+                            {(bmAssignedSelectedPageIds[bm.id] ?? []).length}
+                          </p>
+                        )}
+                        </div>
+                      {canSeeAllPages && bm.pages.length > 0 && (
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const bmSelectedIds = bm.pages
+                                .filter((page) =>
+                                  (bmAllSelectedPageIds[bm.id] ?? []).includes(page.id) &&
+                                  bm.assignedPages.some((assigned) => assigned.id === page.id)
+                                )
+                                .map((page) => page.id)
+                              if (bmSelectedIds.length === 0) return
+                              void copy(bmSelectedIds.join("\n"))
+                            }}
+                            disabled={
+                              (bmAllSelectedPageIds[bm.id] ?? []).length === 0
+                            }
+                            className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
+                          >
+                            <Copy className="mr-1 h-3.5 w-3.5" />
+                            Copy Selected
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const bmSelectedIds = bm.pages
+                                .filter((page) => (bmAllSelectedPageIds[bm.id] ?? []).includes(page.id))
+                                .filter((page) => !bm.assignedPages.some((assigned) => assigned.id === page.id))
+                                .map((page) => page.id)
+                              if (bmSelectedIds.length === 0) return
+                              if (!activeViewerId || !activeToken) {
+                                toast.error("Missing account user context")
+                                return
+                              }
+                              void assignByUserToken(
+                                bmSelectedIds,
+                                bm.id,
+                                activeViewerId,
+                                activeToken,
+                                systemUserAssignTaskMode
+                              )
+                            }}
+                            disabled={
+                              bm.pages.filter((page) => (bmAllSelectedPageIds[bm.id] ?? []).includes(page.id))
+                                .filter((page) => !bm.assignedPages.some((assigned) => assigned.id === page.id))
+                                .length === 0 || loadingData
+                            }
+                            className="h-8 cursor-pointer border-emerald-200 bg-white px-3 text-xs text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:text-emerald-300"
+                          >
+                            Assign Selected
+                          </Button>
+                        </div>
                       )}
-                    </tbody>
-                  </table>
+                      {!canSeeAllPages && bm.assignedPages.length > 0 && (
+                        <div className="flex items-center justify-end gap-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const assignedSelectedIds = bm.assignedPages
+                                .filter((page) => (bmAssignedSelectedPageIds[bm.id] ?? []).includes(page.id))
+                                .map((page) => page.id)
+                              if (assignedSelectedIds.length === 0) return
+                              void copy(assignedSelectedIds.join("\n"))
+                            }}
+                            disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0}
+                            className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
+                          >
+                            <Copy className="mr-1 h-3.5 w-3.5" />
+                            Copy Selected
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const assignedSelectedIds = bm.assignedPages
+                                .filter((page) => (bmAssignedSelectedPageIds[bm.id] ?? []).includes(page.id))
+                                .map((page) => page.id)
+                              if (assignedSelectedIds.length === 0) return
+                              if (!activeViewerId || !activeToken) {
+                                toast.error("Missing account user context")
+                                return
+                              }
+                              void deleteByUserTokenLegacy(assignedSelectedIds, activeViewerId, activeToken)
+                            }}
+                            disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0 || loadingData}
+                            className="h-8 cursor-pointer border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5" />
+                            Delete Selected
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    {canSeeAllPages && (
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                        <div className="max-h-[440px] overflow-y-auto">
+                        <table className="w-full table-fixed text-sm">
+                            <thead className="bg-slate-50">
+                              <tr className="text-left font-semibold">
+                              <th className="sticky top-0 z-10 w-[64px] bg-slate-50 p-3">#</th>
+                              <th className="sticky top-0 z-10 w-[210px] bg-slate-50 p-3">Page ID</th>
+                              <th className="sticky top-0 z-10 bg-slate-50 p-3">Page Name</th>
+                              <th className="sticky top-0 z-10 w-[180px] bg-slate-50 p-3">Category</th>
+                              <th className="sticky top-0 z-10 w-[72px] bg-slate-50 p-3 text-right">
+                                  {bm.pages.length > 0 && (
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        bm.pages.length > 0 &&
+                                        bm.pages.every((page) =>
+                                          (bmAllSelectedPageIds[bm.id] ?? []).includes(page.id)
+                                        )
+                                      }
+                                      onChange={(e) => {
+                                        const bmPageIds = bm.pages.map((page) => page.id)
+                                        if (e.target.checked) {
+                                          setBmAllSelectedPageIds((prev) => ({ ...prev, [bm.id]: bmPageIds }))
+                                        } else {
+                                          setBmAllSelectedPageIds((prev) => ({ ...prev, [bm.id]: [] }))
+                                        }
+                                      }}
+                                      className="h-4 w-4 cursor-pointer accent-slate-600"
+                                      aria-label={`Select all pages in ${bm.name}`}
+                                    />
+                                  )}
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {bm.pages.length === 0 && (
+                                <tr className="border-t">
+                                  <td className="p-3 text-slate-500" colSpan={5}>
+                                    No pages in this BM.
+                                  </td>
+                                </tr>
+                              )}
+                              {[...bm.pages]
+                                .sort((a, b) => {
+                                  const aAssigned = bm.assignedPages.some((assigned) => assigned.id === a.id) ? 1 : 0
+                                  const bAssigned = bm.assignedPages.some((assigned) => assigned.id === b.id) ? 1 : 0
+                                  return bAssigned - aAssigned
+                                })
+                                .map((row, index) => (
+                                <tr
+                                  key={`${row.businessId}-${row.id}-${index}`}
+                                  className={`border-t ${
+                                    bm.assignedPages.some((assigned) => assigned.id === row.id)
+                                      ? "bg-emerald-50/40 hover:bg-emerald-50/70"
+                                      : "hover:bg-slate-50/60"
+                                  }`}
+                                >
+                                  <td className="p-3">{index + 1}</td>
+                                  <td className="p-3">
+                                    <div className="flex w-full items-center justify-between gap-1">
+                                      <span className="font-mono">{row.id}</span>
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        onClick={() => copy(row.id)}
+                                        className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                                        title="Copy page id"
+                                      >
+                                        <Copy className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  </td>
+                                  <td className="p-3">{row.name}</td>
+                                  <td className="p-3">{row.category || "-"}</td>
+                                  <td className="p-3 text-right">
+                                    <input
+                                      type="checkbox"
+                                      checked={(bmAllSelectedPageIds[bm.id] ?? []).includes(row.id)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setBmAllSelectedPageIds((prev) => ({
+                                            ...prev,
+                                            [bm.id]: [...new Set([...(prev[bm.id] ?? []), row.id])],
+                                          }))
+                                        } else {
+                                          setBmAllSelectedPageIds((prev) => ({
+                                            ...prev,
+                                            [bm.id]: (prev[bm.id] ?? []).filter((id) => id !== row.id),
+                                          }))
+                                        }
+                                      }}
+                                      className="h-4 w-4 cursor-pointer accent-slate-600"
+                                      aria-label={`Select page ${row.name}`}
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    {(!canSeeAllPages || bm.assignedPages.length > 0) && (
+                    <div className="space-y-2 pt-2">
+                      {canSeeAllPages && (
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-xs text-slate-600">
+                            assigned pages: {bm.assignedPages.length} selected:{" "}
+                            {(bmAssignedSelectedPageIds[bm.id] ?? []).length}
+                          </p>
+                          {bm.assignedPages.length > 0 && (
+                            <div className="flex items-center gap-3">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  const assignedSelectedIds = bm.assignedPages
+                                    .filter((page) => (bmAssignedSelectedPageIds[bm.id] ?? []).includes(page.id))
+                                    .map((page) => page.id)
+                                  if (assignedSelectedIds.length === 0) return
+                                  void copy(assignedSelectedIds.join("\n"))
+                                }}
+                                disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0}
+                                className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
+                              >
+                                <Copy className="mr-1 h-3.5 w-3.5" />
+                                Copy Selected
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  const assignedSelectedIds = bm.assignedPages
+                                    .filter((page) => (bmAssignedSelectedPageIds[bm.id] ?? []).includes(page.id))
+                                    .map((page) => page.id)
+                                  if (assignedSelectedIds.length === 0) return
+                                  if (!activeViewerId || !activeToken) {
+                                    toast.error("Missing account user context")
+                                    return
+                                  }
+                                  void deleteByUserTokenLegacy(assignedSelectedIds, activeViewerId, activeToken)
+                                }}
+                                disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0 || loadingData}
+                                className="h-8 cursor-pointer border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                Delete Selected
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      <div className="max-h-[660px] overflow-y-auto">
+                        <table className="w-full table-fixed text-sm">
+                          <thead className="bg-slate-50">
+                            <tr className="text-left font-semibold">
+                              <th className="sticky top-0 z-10 w-[64px] bg-slate-50 p-3">#</th>
+                              <th className="sticky top-0 z-10 w-[210px] bg-slate-50 p-3">Assigned Page ID</th>
+                              <th className="sticky top-0 z-10 bg-slate-50 p-3">Assigned Page Name</th>
+                              <th className="sticky top-0 z-10 w-[180px] bg-slate-50 p-3">Category</th>
+                              <th className="sticky top-0 z-10 w-[72px] bg-slate-50 p-3 text-right">
+                                {bm.assignedPages.length > 0 && (
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      bm.assignedPages.length > 0 &&
+                                      bm.assignedPages.every((page) =>
+                                        (bmAssignedSelectedPageIds[bm.id] ?? []).includes(page.id)
+                                      )
+                                    }
+                                    onChange={(e) => {
+                                      const assignedIds = bm.assignedPages.map((page) => page.id)
+                                      if (e.target.checked) {
+                                        setBmAssignedSelectedPageIds((prev) => ({ ...prev, [bm.id]: assignedIds }))
+                                      } else {
+                                        setBmAssignedSelectedPageIds((prev) => ({ ...prev, [bm.id]: [] }))
+                                      }
+                                    }}
+                                    className="h-4 w-4 cursor-pointer accent-slate-600"
+                                    aria-label={`Select all assigned pages in ${bm.name}`}
+                                  />
+                                )}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {bm.assignedPages.length === 0 && (
+                              <tr className="border-t">
+                                <td className="p-3 text-slate-500" colSpan={5}>
+                                  No assigned pages in this BM.
+                                </td>
+                              </tr>
+                            )}
+                            {bm.assignedPages.map((row, index) => (
+                              <tr key={`assigned-${bm.id}-${row.id}-${index}`} className="border-t hover:bg-slate-50/60">
+                                <td className="p-3">{index + 1}</td>
+                                <td className="p-3">
+                                  <div className="flex w-full items-center justify-between gap-1">
+                                    <span className="font-mono">{row.id}</span>
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
+                                      onClick={() => copy(row.id)}
+                                      className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                                      title="Copy assigned page id"
+                                    >
+                                      <Copy className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </td>
+                                <td className="p-3">{row.name}</td>
+                                <td className="p-3">{row.category || "-"}</td>
+                                <td className="p-3 text-right">
+                                  <input
+                                    type="checkbox"
+                                    checked={(bmAssignedSelectedPageIds[bm.id] ?? []).includes(row.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setBmAssignedSelectedPageIds((prev) => ({
+                                          ...prev,
+                                          [bm.id]: [...new Set([...(prev[bm.id] ?? []), row.id])],
+                                        }))
+                                      } else {
+                                        setBmAssignedSelectedPageIds((prev) => ({
+                                          ...prev,
+                                          [bm.id]: (prev[bm.id] ?? []).filter((id) => id !== row.id),
+                                        }))
+                                      }
+                                    }}
+                                    className="h-4 w-4 cursor-pointer accent-slate-600"
+                                    aria-label={`Select assigned page ${row.name}`}
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    </div>
+                    )}
+                    </div>
+                )})}
                 </div>
-              </div>
+              )}
             </>
           )}
 
