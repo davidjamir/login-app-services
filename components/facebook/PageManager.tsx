@@ -9,6 +9,7 @@ import { ClipboardPaste, Copy, RefreshCcw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { facebookService } from "@/services/facebook.service"
 import { FacebookBusiness, FacebookPage, SystemUser } from "@/types/facebook"
+import AssetGroupBlock from "@/components/facebook/AssetGroupBlock"
 
 type SourceMode = "system-user" | "account-user"
 type BusinessPageRow = FacebookPage & {
@@ -50,7 +51,14 @@ export default function PageManager() {
   const [pushedPageIdsInput, setPushedPageIdsInput] = useState("")
   const [bulkSourceBmId, setBulkSourceBmId] = useState("")
   const [bulkActionType, setBulkActionType] = useState<
-    "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm"
+    | "share-other-bm"
+    | "add-current-bm"
+    | "assign-user-current-bm"
+    | "remove-user-current-bm"
+    | "remove-page-current-bm"
+    | "create-system-user"
+    | "edit-system-user"
+    | "manage-asset-groups"
   >("add-current-bm")
   const [bulkTargetUserMode, setBulkTargetUserMode] = useState<"system-user" | "manual">("system-user")
   const [systemUserAssignTaskMode, setSystemUserAssignTaskMode] = useState<"basic" | "manager">("basic")
@@ -60,6 +68,16 @@ export default function PageManager() {
   const [bulkTargetBmId, setBulkTargetBmId] = useState("")
   const [bulkTargetUserId, setBulkTargetUserId] = useState("")
   const [latestResponses, setLatestResponses] = useState<LatestResponseItem[]>([])
+  const [createSystemUserName, setCreateSystemUserName] = useState("")
+  const [createSystemUserRole, setCreateSystemUserRole] = useState<"ADMIN" | "EMPLOYEE">("EMPLOYEE")
+  const [createSystemUserLoading, setCreateSystemUserLoading] = useState(false)
+  const [editSystemUserId, setEditSystemUserId] = useState("")
+  const [editSystemUserName, setEditSystemUserName] = useState("")
+  const [editSystemUserLoading, setEditSystemUserLoading] = useState(false)
+  const [createBmSystemUsers, setCreateBmSystemUsers] = useState<
+    Array<{ id: string; name: string; role?: string }>
+  >([])
+  const [createBmSystemUsersLoading, setCreateBmSystemUsersLoading] = useState(false)
 
   const selectedSystemUser =
     selectedUserIndex !== "" ? systemUsers[Number(selectedUserIndex)] : undefined
@@ -130,7 +148,10 @@ export default function PageManager() {
   )
   const allowedBulkActions = useMemo(() => {
     if (!selectedBulkSourceBm) {
-      return [] as Array<{ value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm"; label: string }>
+      return [] as Array<{
+        value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups"
+        label: string
+      }>
     }
 
     const roles = (selectedBulkSourceBm.permitted_roles ?? []).map((role) => String(role).toLowerCase())
@@ -143,10 +164,19 @@ export default function PageManager() {
         { value: "assign-user-current-bm", label: "Assign to user in current BM" },
         { value: "remove-user-current-bm", label: "Remove from user in current BM" },
         { value: "remove-page-current-bm", label: "Remove page from current BM" },
-      ] as Array<{ value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm"; label: string }>
+        { value: "create-system-user", label: "Create System User" },
+        { value: "edit-system-user", label: "Edit System User" },
+        { value: "manage-asset-groups", label: "Manage Asset Groups" },
+      ] as Array<{
+        value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups"
+        label: string
+      }>
     }
 
-    return [] as Array<{ value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm"; label: string }>
+    return [] as Array<{
+      value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups"
+      label: string
+    }>
   }, [selectedBulkSourceBm])
 
   useEffect(() => {
@@ -194,6 +224,37 @@ export default function PageManager() {
       active = false
     }
   }, [mode, isAdminVerified, activeToken, bulkSourceBmId, bulkTargetUserMode])
+
+  useEffect(() => {
+    if (!isAdminVerified || !activeToken || !bulkSourceBmId) {
+      setCreateBmSystemUsers([])
+      setCreateBmSystemUsersLoading(false)
+      setEditSystemUserId("")
+      setEditSystemUserName("")
+      return
+    }
+
+    let active = true
+    setCreateBmSystemUsersLoading(true)
+    void facebookService
+      .getBusinessSystemUsers(activeToken, bulkSourceBmId)
+      .then((users) => {
+        if (!active) return
+        setCreateBmSystemUsers(users)
+      })
+      .catch(() => {
+        if (!active) return
+        setCreateBmSystemUsers([])
+      })
+      .finally(() => {
+        if (!active) return
+        setCreateBmSystemUsersLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [isAdminVerified, activeToken, bulkSourceBmId])
 
   const loadSystemUsers = async (password: string) => {
     const res = await fetch("/api/database/systemUsers/secure-list", {
@@ -270,12 +331,136 @@ export default function PageManager() {
   }
 
   const copy = async (text: string) => {
+    if (!text) return
     try {
-      await navigator.clipboard.writeText(text)
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const el = document.createElement("textarea")
+        el.value = text
+        el.setAttribute("readonly", "")
+        el.style.position = "absolute"
+        el.style.left = "-9999px"
+        document.body.appendChild(el)
+        el.select()
+        document.execCommand("copy")
+        document.body.removeChild(el)
+      }
       toast.success("Copied")
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Copy failed"
+      toast.error(message)
+    }
+  }
+
+  const handleCreateSystemUser = async () => {
+    const token = activeToken
+    const businessId = bulkSourceBmId
+    const name = createSystemUserName.trim()
+
+    if (!token) {
+      toast.error("Access token required. Use Account User mode or select a system user.")
+      return
+    }
+    if (!businessId) {
+      toast.error("Please select a Business Manager first")
+      return
+    }
+    if (!name) {
+      toast.error("Please enter system user name")
+      return
+    }
+
+    try {
+      setCreateSystemUserLoading(true)
+      const res = await fetch("/api/facebook/business/systemUsers/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          businessId,
+          name,
+          role: createSystemUserRole,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || data.message || "Failed to create system user")
+      }
+
+      toast.success(`System user created: ${data.data?.id ?? "OK"}`)
+      setCreateSystemUserName("")
+      setCreateBmSystemUsers((prev) => [
+        ...prev,
+        { id: data.data?.id ?? "", name, role: createSystemUserRole },
+      ])
+      setBulkBmSystemUsers((prev) =>
+        prev.length > 0
+          ? [...prev, { id: data.data?.id ?? "", name, role: createSystemUserRole }]
+          : prev
+      )
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error"
       toast.error(message)
+    } finally {
+      setCreateSystemUserLoading(false)
+    }
+  }
+
+  const handleEditSystemUser = async () => {
+    const token = activeToken
+    const businessId = bulkSourceBmId
+    const systemUserId = editSystemUserId.trim()
+    const name = editSystemUserName.trim()
+
+    if (!token) {
+      toast.error("Access token required. Use Account User mode or select a system user.")
+      return
+    }
+    if (!businessId) {
+      toast.error("Please select a Business Manager first")
+      return
+    }
+    if (!systemUserId) {
+      toast.error("Please select a system user to edit")
+      return
+    }
+    if (!name) {
+      toast.error("Please enter new name")
+      return
+    }
+
+    try {
+      setEditSystemUserLoading(true)
+      const res = await fetch("/api/facebook/business/systemUsers/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          businessId,
+          systemUserId,
+          name,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || data.message || "Failed to update system user")
+      }
+
+      toast.success("System user updated")
+      setCreateBmSystemUsers((prev) =>
+        prev.map((u) => (u.id === systemUserId ? { ...u, name } : u))
+      )
+      setBulkBmSystemUsers((prev) =>
+        prev.map((u) => (u.id === systemUserId ? { ...u, name } : u))
+      )
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      toast.error(message)
+    } finally {
+      setEditSystemUserLoading(false)
     }
   }
 
@@ -630,7 +815,7 @@ export default function PageManager() {
     try {
       setLoadingData(true)
       const selectedIds = [...selectedPageIds]
-      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatchLegacy(
+      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatch(
         selectedIds,
         userId,
         adminToken
@@ -1259,10 +1444,20 @@ export default function PageManager() {
                     variant="outline"
                     onClick={handleDeleteSelectedPages}
                     disabled={selectedPageIds.length === 0 || !effectiveAdminSystemUser?.token}
-                    className="h-8 cursor-pointer border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                    className="h-8 cursor-pointer rounded-r-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
                   >
                     <Trash2 className="mr-1 h-3.5 w-3.5" />
                     Delete Selected
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSelectedPageIds([])}
+                    disabled={selectedPageIds.length === 0}
+                    className="-ml-px h-8 cursor-pointer rounded-l-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    Clear Selected
                   </Button>
                 </div>
               </div>
@@ -1431,6 +1626,9 @@ export default function PageManager() {
                           | "assign-user-current-bm"
                           | "remove-user-current-bm"
                           | "remove-page-current-bm"
+                          | "create-system-user"
+                          | "edit-system-user"
+                          | "manage-asset-groups"
                       )
                     }
                     className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
@@ -1446,6 +1644,99 @@ export default function PageManager() {
                       ))
                     )}
                   </select>
+                  {bulkActionType === "create-system-user" && bulkSourceBmId && (
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/50 p-2">
+                      <p className="text-xs font-medium text-slate-600">Create System User</p>
+                      <p className="text-[11px] text-slate-500">
+                        Current: {createBmSystemUsersLoading ? "..." : `${createBmSystemUsers.length} system user(s)`}
+                        {createBmSystemUsers.length > 0 && (
+                          <span className="ml-1">
+                            ({createBmSystemUsers.filter((u) => u.role === "ADMIN").length} ADMIN,{" "}
+                            {createBmSystemUsers.filter((u) => u.role === "EMPLOYEE").length} EMPLOYEE)
+                          </span>
+                        )}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          value={createSystemUserName}
+                          onChange={(e) => setCreateSystemUserName(e.target.value)}
+                          placeholder="System user name"
+                          className="h-8 flex-1 min-w-[120px] text-xs"
+                        />
+                        <select
+                          value={createSystemUserRole}
+                          onChange={(e) => setCreateSystemUserRole(e.target.value as "ADMIN" | "EMPLOYEE")}
+                          className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"
+                        >
+                          <option value="ADMIN">ADMIN</option>
+                          <option value="EMPLOYEE">EMPLOYEE</option>
+                        </select>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleCreateSystemUser()}
+                          disabled={
+                            !activeToken ||
+                            !createSystemUserName.trim() ||
+                            createSystemUserLoading
+                          }
+                          className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed"
+                        >
+                          {createSystemUserLoading ? "Creating..." : "Create"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {bulkActionType === "edit-system-user" && bulkSourceBmId && (
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/50 p-2">
+                      <p className="text-xs font-medium text-slate-600">Edit System User</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={editSystemUserId}
+                          onChange={(e) => {
+                            const id = e.target.value
+                            setEditSystemUserId(id)
+                            const user = createBmSystemUsers.find((u) => u.id === id)
+                            setEditSystemUserName(user?.name ?? "")
+                          }}
+                          className="h-8 flex-1 min-w-[180px] rounded-md border border-slate-300 bg-white px-2 text-xs"
+                        >
+                          <option value="">
+                            {createBmSystemUsersLoading
+                              ? "Loading..."
+                              : createBmSystemUsers.length > 0
+                              ? "Select system user"
+                              : "No system users"}
+                          </option>
+                          {createBmSystemUsers.map((user) => (
+                            <option key={user.id} value={user.id}>
+                              {`${user.name} • ${user.role || "-"} • ${user.id}`}
+                            </option>
+                          ))}
+                        </select>
+                        <Input
+                          value={editSystemUserName}
+                          onChange={(e) => setEditSystemUserName(e.target.value)}
+                          placeholder="New name"
+                          className="h-8 flex-1 min-w-[120px] text-xs"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleEditSystemUser()}
+                          disabled={
+                            !activeToken ||
+                            !editSystemUserId ||
+                            !editSystemUserName.trim() ||
+                            editSystemUserLoading
+                          }
+                          className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed"
+                        >
+                          {editSystemUserLoading ? "Updating..." : "Update"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   {bulkActionType === "share-other-bm" && (
                     <Input
                       value={bulkTargetBmId}
@@ -1456,7 +1747,10 @@ export default function PageManager() {
                   )}
                   {bulkActionType !== "add-current-bm" &&
                     bulkActionType !== "remove-page-current-bm" &&
-                    bulkActionType !== "share-other-bm" && (
+                    bulkActionType !== "share-other-bm" &&
+                    bulkActionType !== "create-system-user" &&
+                    bulkActionType !== "edit-system-user" &&
+                    bulkActionType !== "manage-asset-groups" && (
                     <div className="space-y-2">
                       <select
                         value={bulkTargetUserMode}
@@ -1509,20 +1803,38 @@ export default function PageManager() {
                       </option>
                     </select>
                   )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void executeBulkAction()}
-                    disabled={!pushedPageIdsInput.trim() || !bulkSourceBmId || allowedBulkActions.length === 0 || loadingData}
-                    className="h-9 w-full cursor-pointer border-slate-300 bg-slate-50 px-3 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed"
-                  >
-                    Run Action
-                  </Button>
-                  <p className="text-[11px] text-slate-500">
-                    IDs are read line-by-line. Use Push to preview selection, then Run Action.
-                  </p>
+                  {bulkActionType !== "create-system-user" &&
+                    bulkActionType !== "edit-system-user" &&
+                    bulkActionType !== "manage-asset-groups" && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void executeBulkAction()}
+                        disabled={!pushedPageIdsInput.trim() || !bulkSourceBmId || allowedBulkActions.length === 0 || loadingData}
+                        className="h-9 w-full cursor-pointer border-slate-300 bg-slate-50 px-3 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed"
+                      >
+                        Run Action
+                      </Button>
+                      <p className="text-[11px] text-slate-500">
+                        IDs are read line-by-line. Use Push to preview selection, then Run Action.
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
+
+              {bulkActionType === "manage-asset-groups" && bulkSourceBmId && activeToken && (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h3 className="mb-4 text-lg font-semibold tracking-tight">Manage Asset Groups</h3>
+                  <AssetGroupBlock
+                    activeToken={activeToken}
+                    businessId={bulkSourceBmId}
+                    systemUsers={createBmSystemUsers}
+                    pageIdsInput={pushedPageIdsInput}
+                  />
+                </div>
+              )}
 
               <div className="space-y-3">
                 <h3 className="text-lg font-semibold tracking-tight">Business Managers</h3>
@@ -1591,22 +1903,37 @@ export default function PageManager() {
                     )}
                   </div>
                   {outsidePages.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const outsideSelectedIds = outsidePages
-                          .filter((page) => outsideSelectedPageIds.includes(page.id))
-                          .map((page) => page.id)
-                        if (outsideSelectedIds.length === 0) return
-                        void copy(outsideSelectedIds.join("\n"))
-                      }}
-                      disabled={outsideSelectedPageIds.length === 0}
-                      className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
-                    >
-                      <Copy className="mr-1 h-3.5 w-3.5" />
-                      Copy Selected
-                    </Button>
+                    <div className="flex items-center">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          const outsideSelectedIds = outsidePages
+                            .filter((page) => outsideSelectedPageIds.includes(page.id))
+                            .map((page) => page.id)
+                          if (outsideSelectedIds.length === 0) {
+                            toast.error("No pages selected")
+                            return
+                          }
+                          await copy(outsideSelectedIds.join("\n"))
+                        }}
+                        disabled={outsideSelectedPageIds.length === 0}
+                        className="h-8 cursor-pointer rounded-r-none border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
+                      >
+                        <Copy className="mr-1 h-3.5 w-3.5" />
+                        Copy Selected
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setOutsideSelectedPageIds([])}
+                        disabled={outsideSelectedPageIds.length === 0}
+                        className="-ml-px h-8 cursor-pointer rounded-l-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                      >
+                        <Trash2 className="mr-1 h-3.5 w-3.5" />
+                        Clear Selected
+                      </Button>
+                    </div>
                   )}
                 </div>
                 <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -1720,19 +2047,17 @@ export default function PageManager() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
+                            onClick={async () => {
                               const bmSelectedIds = bm.pages
-                                .filter((page) =>
-                                  (bmAllSelectedPageIds[bm.id] ?? []).includes(page.id) &&
-                                  bm.assignedPages.some((assigned) => assigned.id === page.id)
-                                )
+                                .filter((page) => (bmAllSelectedPageIds[bm.id] ?? []).includes(page.id))
                                 .map((page) => page.id)
-                              if (bmSelectedIds.length === 0) return
-                              void copy(bmSelectedIds.join("\n"))
+                              if (bmSelectedIds.length === 0) {
+                                toast.error("No pages selected")
+                                return
+                              }
+                              await copy(bmSelectedIds.join("\n"))
                             }}
-                            disabled={
-                              (bmAllSelectedPageIds[bm.id] ?? []).length === 0
-                            }
+                            disabled={(bmAllSelectedPageIds[bm.id] ?? []).length === 0}
                             className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
                           >
                             <Copy className="mr-1 h-3.5 w-3.5" />
@@ -1764,9 +2089,19 @@ export default function PageManager() {
                                 .filter((page) => !bm.assignedPages.some((assigned) => assigned.id === page.id))
                                 .length === 0 || loadingData
                             }
-                            className="h-8 cursor-pointer border-emerald-200 bg-white px-3 text-xs text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:text-emerald-300"
+                            className="h-8 cursor-pointer rounded-r-none border-emerald-200 bg-white px-3 text-xs text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:text-emerald-300"
                           >
                             Assign Selected
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setBmAllSelectedPageIds((prev) => ({ ...prev, [bm.id]: [] }))}
+                            disabled={(bmAllSelectedPageIds[bm.id] ?? []).length === 0}
+                            className="-ml-px h-8 cursor-pointer rounded-l-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5" />
+                            Clear Selected
                           </Button>
                         </div>
                       )}
@@ -1775,12 +2110,15 @@ export default function PageManager() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
+                            onClick={async () => {
                               const assignedSelectedIds = bm.assignedPages
                                 .filter((page) => (bmAssignedSelectedPageIds[bm.id] ?? []).includes(page.id))
                                 .map((page) => page.id)
-                              if (assignedSelectedIds.length === 0) return
-                              void copy(assignedSelectedIds.join("\n"))
+                              if (assignedSelectedIds.length === 0) {
+                                toast.error("No pages selected")
+                                return
+                              }
+                              await copy(assignedSelectedIds.join("\n"))
                             }}
                             disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0}
                             className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
@@ -1803,10 +2141,20 @@ export default function PageManager() {
                               void deleteByUserTokenLegacy(assignedSelectedIds, activeViewerId, activeToken)
                             }}
                             disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0 || loadingData}
-                            className="h-8 cursor-pointer border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                            className="h-8 cursor-pointer rounded-r-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
                           >
                             <Trash2 className="mr-1 h-3.5 w-3.5" />
                             Delete Selected
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setBmAssignedSelectedPageIds((prev) => ({ ...prev, [bm.id]: [] }))}
+                            disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0}
+                            className="-ml-px h-8 cursor-pointer rounded-l-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5" />
+                            Clear Selected
                           </Button>
                         </div>
                       )}
@@ -1927,12 +2275,15 @@ export default function PageManager() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => {
+                                onClick={async () => {
                                   const assignedSelectedIds = bm.assignedPages
                                     .filter((page) => (bmAssignedSelectedPageIds[bm.id] ?? []).includes(page.id))
                                     .map((page) => page.id)
-                                  if (assignedSelectedIds.length === 0) return
-                                  void copy(assignedSelectedIds.join("\n"))
+                                  if (assignedSelectedIds.length === 0) {
+                                    toast.error("No pages selected")
+                                    return
+                                  }
+                                  await copy(assignedSelectedIds.join("\n"))
                                 }}
                                 disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0}
                                 className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
@@ -1955,10 +2306,20 @@ export default function PageManager() {
                                   void deleteByUserTokenLegacy(assignedSelectedIds, activeViewerId, activeToken)
                                 }}
                                 disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0 || loadingData}
-                                className="h-8 cursor-pointer border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                                className="h-8 cursor-pointer rounded-r-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
                               >
                                 <Trash2 className="mr-1 h-3.5 w-3.5" />
                                 Delete Selected
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setBmAssignedSelectedPageIds((prev) => ({ ...prev, [bm.id]: [] }))}
+                                disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0}
+                                className="-ml-px h-8 cursor-pointer rounded-l-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                Clear Selected
                               </Button>
                             </div>
                           )}

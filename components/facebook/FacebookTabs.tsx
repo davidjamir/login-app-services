@@ -13,7 +13,7 @@ export default function FacebookTabs() {
 
   return (
     <div className="space-y-5">
-      <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+      <div className="inline-flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
         <Button
           variant="outline"
           onClick={() => setActiveTab("page-token")}
