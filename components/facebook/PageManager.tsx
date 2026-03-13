@@ -60,7 +60,6 @@ export default function PageManager() {
   const [bulkTargetBmId, setBulkTargetBmId] = useState("")
   const [bulkTargetUserId, setBulkTargetUserId] = useState("")
   const [latestResponses, setLatestResponses] = useState<LatestResponseItem[]>([])
-  const [hasLatestResponseError, setHasLatestResponseError] = useState(false)
 
   const selectedSystemUser =
     selectedUserIndex !== "" ? systemUsers[Number(selectedUserIndex)] : undefined
@@ -375,7 +374,6 @@ export default function PageManager() {
     })
 
     setLatestResponses(responses)
-    setHasLatestResponseError(result.failed.length > 0)
 
     if (result.failed.length === 0) {
       toast.success(`Deleted ${result.successPageIds.length} page permission(s)`)
@@ -392,7 +390,6 @@ export default function PageManager() {
       message,
     }))
     setLatestResponses(fallbackResponses)
-    setHasLatestResponseError(true)
     toast.error(message)
   }
 
@@ -433,7 +430,6 @@ export default function PageManager() {
     })
 
     setLatestResponses(responses)
-    setHasLatestResponseError(result.failed.length > 0)
 
     if (result.failed.length === 0) {
       toast.success(`Assigned ${result.successPageIds.length} page permission(s)`)
@@ -450,7 +446,6 @@ export default function PageManager() {
       message,
     }))
     setLatestResponses(fallbackResponses)
-    setHasLatestResponseError(true)
     toast.error(message)
   }
 
@@ -471,7 +466,6 @@ export default function PageManager() {
     })
 
     setLatestResponses(responses)
-    setHasLatestResponseError(result.failed.length > 0)
 
     if (result.failed.length === 0) {
       toast.success(`Added ${result.successPageIds.length} page(s) into business`)
@@ -490,7 +484,6 @@ export default function PageManager() {
         message,
       }))
     )
-    setHasLatestResponseError(true)
     toast.error(message)
   }
 
@@ -531,7 +524,6 @@ export default function PageManager() {
           } satisfies LatestResponseItem
         })
       )
-      setHasLatestResponseError(result.failed.length > 0)
       if (result.failed.length === 0) {
         toast.success(`Removed ${result.successPageIds.length} page(s) from business`)
       } else {
@@ -548,7 +540,6 @@ export default function PageManager() {
           message,
         }))
       )
-      setHasLatestResponseError(true)
       toast.error(message)
     } finally {
       setLoadingData(false)
@@ -581,7 +572,6 @@ export default function PageManager() {
           } satisfies LatestResponseItem
         })
       )
-      setHasLatestResponseError(result.failed.length > 0)
       if (result.failed.length === 0) {
         toast.success(`Shared ${result.successPageIds.length} page(s) to target business`)
       } else {
@@ -598,7 +588,6 @@ export default function PageManager() {
           message,
         }))
       )
-      setHasLatestResponseError(true)
       toast.error(message)
     } finally {
       setLoadingData(false)
@@ -630,6 +619,7 @@ export default function PageManager() {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- businessId kept for API consistency
   const deleteBySystemAdmin = async (userId: string, businessId: string) => {
     const adminToken = effectiveAdminSystemUser?.token || ""
     if (!adminToken) {
@@ -827,6 +817,13 @@ export default function PageManager() {
           }
         })
       )
+
+      const flattenedBmPages = bmPageGroups
+        .filter((item) => item.status === "fulfilled")
+        .flatMap((item) =>
+          (item as PromiseFulfilledResult<{ bm: FacebookBusiness; pages: BusinessPageRow[] }>).value.pages
+        )
+
       const bmAssignedGroups = await Promise.allSettled(
         normalizedBusinesses.map(async (bm) => {
           const pagesInBm = flattenedBmPages
@@ -848,10 +845,6 @@ export default function PageManager() {
           }
         })
       )
-
-      const flattenedBmPages = bmPageGroups
-        .filter((item): item is PromiseFulfilledResult<{ bm: FacebookBusiness; pages: BusinessPageRow[] }> => item.status === "fulfilled")
-        .flatMap((item) => item.value.pages)
       const bmPageIdSet = new Set(flattenedBmPages.map((item) => item.id))
       const pagesOutsideBm = managedPages.filter((page) => !bmPageIdSet.has(page.id))
       const nextAssignedByBusiness: Record<string, string[]> = {}

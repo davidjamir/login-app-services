@@ -1,7 +1,7 @@
 'use client'
 
 import Image from "next/image"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -94,7 +94,7 @@ export default function SystemUserManager() {
     }
   }
 
-  const crawlUser = async (token: string) => {
+  const crawlUser = useCallback(async (token: string) => {
     try {
       const fbUser = await facebookService.getMe(token)
       const parsed = parseFromFacebookName(fbUser.name)
@@ -119,7 +119,7 @@ export default function SystemUserManager() {
     } finally {
       setIsCrawling(false)
     }
-  }
+  }, [appNameInput, businessIdInput])
 
   useEffect(() => {
     const token = tokenInput.trim()
@@ -145,7 +145,7 @@ export default function SystemUserManager() {
     }, 3000)
 
     return () => clearTimeout(timeout)
-  }, [tokenInput, isAdminVerified])
+  }, [tokenInput, isAdminVerified, crawlUser])
 
   const handleSave = async () => {
     const token = tokenInput.trim()
