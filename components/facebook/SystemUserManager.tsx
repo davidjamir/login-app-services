@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { Copy, Loader2, RefreshCcw, Trash2 } from "lucide-react"
+import { copyToClipboard } from "@/lib/copy"
 import { SystemUser } from "@/types/facebook"
 import { facebookService } from "@/services/facebook.service"
 
@@ -29,10 +30,9 @@ const parseFromFacebookName = (rawName: string) => {
   }
 }
 
-export default function SystemUserManager() {
-  const [isAdminVerified, setIsAdminVerified] = useState(false)
-  const [authLoading, setAuthLoading] = useState(false)
-  const [authError, setAuthError] = useState("")
+type Props = { adminPassword: string; isAdminVerified: boolean }
+
+export default function SystemUserManager({ adminPassword, isAdminVerified }: Props) {
   const [tokenInput, setTokenInput] = useState("")
   const [appNameInput, setAppNameInput] = useState("")
   const [businessIdInput, setBusinessIdInput] = useState("")
@@ -43,11 +43,10 @@ export default function SystemUserManager() {
   const [saving, setSaving] = useState(false)
   const [refreshingRowKey, setRefreshingRowKey] = useState<string | null>(null)
   const [deletingUserKey, setDeletingUserKey] = useState<string | null>(null)
-  const [adminPasswordInput, setAdminPasswordInput] = useState("")
   const [lastCrawledToken, setLastCrawledToken] = useState("")
-  const [status, setStatus] = useState("Please enter admin password first")
+  const [status, setStatus] = useState("Input token to start crawling")
 
-  const loadSavedUsers = async (password: string) => {
+  const loadSavedUsers = useCallback(async (password: string) => {
     const res = await fetch("/api/database/systemUsers/secure-list", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -60,39 +59,16 @@ export default function SystemUserManager() {
     }
 
     setSavedUsers((data.data ?? []) as SystemUser[])
-  }
+  }, [])
 
-  const handleVerifyAdmin = async () => {
-    const password = adminPasswordInput.trim()
-    if (!password) {
-      toast.error("Please input admin password")
+  useEffect(() => {
+    if (!isAdminVerified || !adminPassword.trim()) {
+      setSavedUsers([])
       return
     }
-
-    try {
-      setAuthLoading(true)
-      setLoadingUsers(true)
-      setAuthError("")
-      await loadSavedUsers(password)
-      setIsAdminVerified(true)
-      setStatus("Input token to start crawling")
-      toast.success("Admin verified")
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Invalid admin password"
-      setIsAdminVerified(false)
-      setSavedUsers([])
-      setPreviewUser(null)
-      setTokenInput("")
-      setAppNameInput("")
-      setBusinessIdInput("")
-      setStatus("Please enter admin password first")
-      setAuthError(message)
-      toast.error(message)
-    } finally {
-      setAuthLoading(false)
-      setLoadingUsers(false)
-    }
-  }
+    setLoadingUsers(true)
+    void loadSavedUsers(adminPassword.trim()).finally(() => setLoadingUsers(false))
+  }, [isAdminVerified, adminPassword, loadSavedUsers])
 
   const crawlUser = useCallback(async (token: string) => {
     try {
@@ -190,7 +166,7 @@ export default function SystemUserManager() {
       )
       toast.success("System user saved")
       setStatus("Saved successfully")
-      await loadSavedUsers(adminPasswordInput.trim())
+      await loadSavedUsers(adminPassword.trim())
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error"
       toast.error(message)
@@ -199,21 +175,8 @@ export default function SystemUserManager() {
     }
   }
 
-  const copy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success("Copied")
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error"
-      toast.error(message)
-    }
-  }
-
   const handleRecrawlAndSave = async (user: SystemUser, rowKey: string) => {
-    if (!adminPasswordInput.trim()) {
-      toast.error("Please input admin password before recrawl")
-      return
-    }
+    if (!adminPassword.trim()) return
     if (!user._id) {
       toast.error("Missing system user record id")
       return
@@ -224,7 +187,7 @@ export default function SystemUserManager() {
       const res = await fetch("/api/database/systemUsers/recrawl", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ _id: user._id, password: adminPasswordInput }),
+        body: JSON.stringify({ _id: user._id, password: adminPassword }),
       })
       const data = await res.json()
 
@@ -233,7 +196,7 @@ export default function SystemUserManager() {
       }
 
       toast.success("Recrawled and saved")
-      await loadSavedUsers(adminPasswordInput.trim())
+      await loadSavedUsers(adminPassword.trim())
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error"
       toast.error(message)
@@ -243,11 +206,7 @@ export default function SystemUserManager() {
   }
 
   const handleDeleteSystemUser = async (user: SystemUser, rowKey: string) => {
-    if (!adminPasswordInput.trim()) {
-      toast.error("Please input admin password before delete")
-      return
-    }
-
+    if (!adminPassword.trim()) return
     if (!user._id) {
       toast.error("Missing system user record id")
       return
@@ -260,7 +219,7 @@ export default function SystemUserManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           _id: user._id,
-          password: adminPasswordInput,
+          password: adminPassword,
         }),
       })
       const data = await res.json()
@@ -270,7 +229,7 @@ export default function SystemUserManager() {
       }
 
       toast.success(data.message || "System user deleted successfully")
-      await loadSavedUsers(adminPasswordInput.trim())
+      await loadSavedUsers(adminPassword.trim())
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error"
       toast.error(message)
@@ -297,36 +256,14 @@ export default function SystemUserManager() {
     return `${hh}:${mm} ${dd}-${MM}-${yy}`
   }
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10">
-      <Card className="relative rounded-2xl border-slate-200 bg-white shadow-lg">
+    <Card className="relative w-full rounded-2xl border-slate-200 bg-white shadow-lg">
         <div className="pointer-events-none absolute right-6 top-6 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
           <Image src="/icon.png" alt="App icon" width={40} height={40} />
         </div>
         <CardContent className="p-8 space-y-8">
-          <div className="space-y-3">
+          <div className="space-y-1">
             <h2 className="text-2xl font-semibold tracking-tight">System User Manager</h2>
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="space-y-1">
-                <p className="text-sm text-slate-600">{status}</p>
-                {authError && <p className="text-xs text-red-600">{authError}</p>}
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="password"
-                  value={adminPasswordInput}
-                  onChange={(e) => setAdminPasswordInput(e.target.value)}
-                  placeholder="Admin password"
-                  className="h-9 w-44 text-xs"
-                />
-                <Button
-                  onClick={handleVerifyAdmin}
-                  disabled={authLoading || !adminPasswordInput.trim()}
-                  className="h-9 min-w-24 cursor-pointer border border-slate-300 bg-slate-50 px-3 text-xs text-slate-700 shadow-sm hover:bg-slate-100"
-                >
-                  {authLoading ? "Checking..." : "Unlock"}
-                </Button>
-              </div>
-            </div>
+            <p className="text-sm text-slate-600">{status}</p>
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr_1fr_auto]">
@@ -400,7 +337,7 @@ export default function SystemUserManager() {
                           <Button
                             size="icon"
                             variant="outline"
-                            onClick={() => copy(previewUser.id)}
+                            onClick={() => void copyToClipboard(previewUser.id)}
                             className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                             title="Copy system user id"
                           >
@@ -451,7 +388,7 @@ export default function SystemUserManager() {
                           <Button
                             size="icon"
                             variant="outline"
-                            onClick={() => copy(user.id)}
+                            onClick={() => void copyToClipboard(user.id)}
                             className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                             title="Copy system user id"
                           >
@@ -467,7 +404,7 @@ export default function SystemUserManager() {
                           <Button
                             size="icon"
                             variant="outline"
-                            onClick={() => copy(user.token ?? "")}
+                            onClick={() => void copyToClipboard(user.token ?? "")}
                             disabled={!user.token}
                             className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                             title="Copy access token"
@@ -527,6 +464,5 @@ export default function SystemUserManager() {
           </div>
         </CardContent>
       </Card>
-    </div>
   )
 }

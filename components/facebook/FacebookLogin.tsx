@@ -1,21 +1,19 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Copy } from "lucide-react"
+import { copyToClipboard } from "@/lib/copy"
 import { facebookService } from "@/services/facebook.service"
 import { FacebookPage, SystemUser } from "@/types/facebook"
 import { toast } from "sonner"
 
-export default function FacebookLogin() {
-    const [status, setStatus] = useState('Please enter admin password first.')
-    const [authError, setAuthError] = useState("")
-    const [adminPasswordInput, setAdminPasswordInput] = useState("")
-    const [isAdminVerified, setIsAdminVerified] = useState(false)
-    const [authLoading, setAuthLoading] = useState(false)
+type Props = { adminPassword: string; isAdminVerified: boolean }
+
+export default function FacebookLogin({ adminPassword, isAdminVerified }: Props) {
+    const [status, setStatus] = useState("Select a system user to crawl page tokens.")
     const [systemUsers, setSystemUsers] = useState<SystemUser[]>([])
     const [selectedUserIndex, setSelectedUserIndex] = useState("")
     const [pages, setPages] = useState<FacebookPage[]>([])
@@ -25,53 +23,33 @@ export default function FacebookLogin() {
     const selectedUser =
         selectedUserIndex !== "" ? systemUsers[Number(selectedUserIndex)] : undefined
 
-    const loadSystemUsers = async (password: string) => {
+    const loadSystemUsers = useCallback(async (password: string) => {
         const res = await fetch("/api/database/systemUsers/secure-list", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ password }),
         })
         const data = await res.json()
-
         if (!res.ok) {
             throw new Error(data.error || data.message || "Failed to load system users")
         }
-
         const users = (data.data ?? []) as SystemUser[]
         setSystemUsers(users)
         setSelectedUserIndex((prev) => {
             const index = Number(prev)
             return Number.isInteger(index) && index >= 0 && index < users.length ? prev : ""
         })
-    }
+    }, [])
 
-    const handleVerifyAdmin = async () => {
-        const password = adminPasswordInput.trim()
-        if (!password) {
-            toast.error("Please input admin password")
-            return
-        }
-
-        try {
-            setAuthLoading(true)
-            setAuthError("")
-            await loadSystemUsers(password)
-            setIsAdminVerified(true)
-            setStatus("Select a system user to crawl page tokens.")
-            toast.success("Admin verified")
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : "Invalid admin password"
-            setIsAdminVerified(false)
+    useEffect(() => {
+        if (!isAdminVerified || !adminPassword.trim()) {
             setSystemUsers([])
             setSelectedUserIndex("")
             setPages([])
-            setStatus("Please enter admin password first.")
-            setAuthError(message)
-            toast.error(message)
-        } finally {
-            setAuthLoading(false)
+            return
         }
-    }
+        void loadSystemUsers(adminPassword.trim())
+    }, [isAdminVerified, adminPassword, loadSystemUsers])
 
     useEffect(() => {
         const token = selectedUser?.token
@@ -105,20 +83,6 @@ export default function FacebookLogin() {
         if (!token) return ''
         if (token.length <= 10) return token
         return `${token.slice(0, 5)}...${token.slice(-5)}`
-    }
-
-    const copy = async (text: string) => {
-        try {
-            await navigator.clipboard.writeText(text)
-            toast.success("Copied")
-        } catch (err: unknown) {
-            if (err instanceof Error) {
-                toast.error(err.message)
-            } else {
-                console.error("Unknown error", err)
-                toast.error("Unknown error")
-            }
-        }
     }
 
     const handlePageSave = async () => {
@@ -165,36 +129,14 @@ export default function FacebookLogin() {
     }
 
     return (
-        <div className="max-w-5xl mx-auto px-6 py-10">
-            <Card className="relative rounded-2xl border-slate-200 bg-white shadow-lg">
+        <Card className="relative w-full rounded-2xl border-slate-200 bg-white shadow-lg">
                 <div className="pointer-events-none absolute right-6 top-6 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
                     <Image src="/icon.png" alt="App icon" width={40} height={40} />
                 </div>
                 <CardContent className="p-8 space-y-8">
-                    <div className="space-y-3">
+                    <div className="space-y-1">
                         <h2 className="text-2xl font-semibold tracking-tight">Page Token Manager</h2>
-                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                            <div className="space-y-1">
-                                <p className="text-sm text-slate-600">{status}</p>
-                                {authError && <p className="text-xs text-red-600">{authError}</p>}
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Input
-                                    type="password"
-                                    value={adminPasswordInput}
-                                    onChange={(e) => setAdminPasswordInput(e.target.value)}
-                                    placeholder="Admin password"
-                                    className="h-9 w-44 text-xs"
-                                />
-                                <Button
-                                    onClick={handleVerifyAdmin}
-                                    disabled={authLoading || !adminPasswordInput.trim()}
-                                    className="h-9 min-w-24 cursor-pointer border border-slate-300 bg-slate-50 px-3 text-xs text-slate-700 shadow-sm hover:bg-slate-100"
-                                >
-                                    {authLoading ? "Checking..." : "Unlock"}
-                                </Button>
-                            </div>
-                        </div>
+                        <p className="text-sm text-slate-600">{status}</p>
                     </div>
 
                     <div className="flex flex-col md:flex-row md:items-center gap-3">
@@ -253,7 +195,7 @@ export default function FacebookLogin() {
                                                     <Button
                                                         size="icon"
                                                         variant="outline"
-                                                        onClick={() => copy(page.id)}
+                                                        onClick={() => void copyToClipboard(page.id)}
                                                         className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                                         title="Copy page id"
                                                     >
@@ -268,7 +210,7 @@ export default function FacebookLogin() {
                                                     <Button
                                                         size="icon"
                                                         variant="outline"
-                                                        onClick={() => copy(page.access_token)}
+                                                        onClick={() => void copyToClipboard(page.access_token)}
                                                         className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                                     >
                                                         <Copy className="w-4 h-4" />
@@ -290,6 +232,5 @@ export default function FacebookLogin() {
                     </div>
                 </CardContent>
             </Card>
-        </div>
     )
 }

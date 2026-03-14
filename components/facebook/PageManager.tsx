@@ -1,11 +1,12 @@
 'use client'
 
 import Image from "next/image"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ClipboardPaste, Copy, RefreshCcw, Trash2 } from "lucide-react"
+import { copyToClipboard } from "@/lib/copy"
 import { toast } from "sonner"
 import { facebookService } from "@/services/facebook.service"
 import { FacebookBusiness, FacebookPage, SystemUser } from "@/types/facebook"
@@ -24,13 +25,10 @@ type LatestResponseItem = {
   message: string
 }
 
-export default function PageManager() {
-  const [status, setStatus] = useState("Please enter admin password first.")
-  const [authError, setAuthError] = useState("")
-  const [adminPasswordInput, setAdminPasswordInput] = useState("")
-  const [isAdminVerified, setIsAdminVerified] = useState(false)
-  const [authLoading, setAuthLoading] = useState(false)
+type Props = { adminPassword: string; isAdminVerified: boolean }
 
+export default function PageManager({ adminPassword, isAdminVerified }: Props) {
+  const [status, setStatus] = useState("Select a system user or enter account token.")
   const [mode, setMode] = useState<SourceMode>("system-user")
   const [systemUsers, setSystemUsers] = useState<SystemUser[]>([])
   const [selectedUserIndex, setSelectedUserIndex] = useState("")
@@ -256,7 +254,7 @@ export default function PageManager() {
     }
   }, [isAdminVerified, activeToken, bulkSourceBmId])
 
-  const loadSystemUsers = async (password: string) => {
+  const loadSystemUsers = useCallback(async (password: string) => {
     const res = await fetch("/api/database/systemUsers/secure-list", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -266,21 +264,28 @@ export default function PageManager() {
     if (!res.ok) {
       throw new Error(data.error || data.message || "Failed to load system users")
     }
-
     const users = (data.data ?? []) as SystemUser[]
     setSystemUsers(users)
     setSelectedUserIndex((prev) => {
       const index = Number(prev)
       return Number.isInteger(index) && index >= 0 && index < users.length ? prev : ""
     })
-    setSelectedAdminUserIndex((prev) => {
-      const index = Number(prev)
-      return Number.isInteger(index) && index >= 0 && index < filteredAdminSystemUsers.length
-        ? prev
-        : ""
-    })
+    setSelectedAdminUserIndex("")
     return users
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!isAdminVerified || !adminPassword.trim()) {
+      setSystemUsers([])
+      setSelectedUserIndex("")
+      setSelectedAdminUserIndex("")
+      setStatus("Select a system user or enter account token.")
+      return
+    }
+    void loadSystemUsers(adminPassword.trim()).then((users) => {
+      setStatus(`Loaded ${users.length} system user(s).`)
+    })
+  }, [isAdminVerified, adminPassword, loadSystemUsers])
 
   useEffect(() => {
     setSelectedAdminUserIndex((prev) => {
@@ -290,68 +295,6 @@ export default function PageManager() {
         : ""
     })
   }, [filteredAdminSystemUsers])
-
-  const handleVerifyAdmin = async () => {
-    const password = adminPasswordInput.trim()
-    if (!password) {
-      toast.error("Please input admin password")
-      return
-    }
-
-    try {
-      setAuthLoading(true)
-      setAuthError("")
-      const users = await loadSystemUsers(password)
-      setIsAdminVerified(true)
-      setMode("system-user")
-      setStatus(`Unlocked. Loaded ${users.length} system user(s).`)
-      toast.success("Admin verified")
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Invalid admin password"
-      setIsAdminVerified(false)
-      setSystemUsers([])
-      setSelectedUserIndex("")
-      setSelectedAdminUserIndex("")
-      setAccountTokenInput("")
-      setBusinesses([])
-      setBusinessPages([])
-      setAssignedPageIdsByBusiness({})
-      setOutsidePages([])
-      setAllManagedPages([])
-      setActiveViewerId("")
-      setOutsideSelectedPageIds([])
-      setBmAllSelectedPageIds({})
-      setBmAssignedSelectedPageIds({})
-      setStatus("Please enter admin password first.")
-      setAuthError(message)
-      toast.error(message)
-    } finally {
-      setAuthLoading(false)
-    }
-  }
-
-  const copy = async (text: string) => {
-    if (!text) return
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text)
-      } else {
-        const el = document.createElement("textarea")
-        el.value = text
-        el.setAttribute("readonly", "")
-        el.style.position = "absolute"
-        el.style.left = "-9999px"
-        document.body.appendChild(el)
-        el.select()
-        document.execCommand("copy")
-        document.body.removeChild(el)
-      }
-      toast.success("Copied")
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Copy failed"
-      toast.error(message)
-    }
-  }
 
   const handleCreateSystemUser = async () => {
     const token = activeToken
@@ -470,7 +413,7 @@ export default function PageManager() {
       .map((page) => page.id)
 
     if (selectedIds.length === 0) return
-    await copy(selectedIds.join("\n"))
+    await copyToClipboard(selectedIds.join("\n"))
   }
 
   const handleDeleteSelectedPages = async () => {
@@ -514,7 +457,7 @@ export default function PageManager() {
   const deleteByUserTokenLegacy = async (selectedIds: string[], userId: string, token: string) => {
     try {
       setLoadingData(true)
-      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatchLegacy(
+      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatch(
         selectedIds,
         userId,
         token
@@ -844,7 +787,7 @@ export default function PageManager() {
       const label = item.status === "success" ? "SUCCESS" : "FAILED"
       return `[${label}] ${item.pageId} (${item.pageName}): ${item.message}`
     })
-    await copy(lines.join("\n"))
+    await copyToClipboard(lines.join("\n"))
   }
 
   const handlePushPageIds = async () => {
@@ -1133,7 +1076,7 @@ export default function PageManager() {
                 const label = item.status === "success" ? "SUCCESS" : "FAILED"
                 return `[${label}] ${item.id} (${item.name}): ${item.message}`
               })
-              void copy(lines.join("\n"))
+              void copyToClipboard(lines.join("\n"))
             }}
             disabled={data.length === 0}
             className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50 disabled:cursor-not-allowed"
@@ -1184,36 +1127,14 @@ export default function PageManager() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
-      <Card className="relative rounded-2xl border-slate-200 bg-white shadow-lg">
+    <Card className="relative w-full rounded-2xl border-slate-200 bg-white shadow-lg">
         <div className="pointer-events-none absolute right-6 top-6 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
           <Image src="/icon.png" alt="App icon" width={40} height={40} />
         </div>
         <CardContent className="space-y-8 p-8">
-          <div className="space-y-3">
+          <div className="space-y-1">
             <h2 className="text-2xl font-semibold tracking-tight">Page Manager</h2>
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="space-y-1">
-                <p className="text-sm text-slate-600">{status}</p>
-                {authError && <p className="text-xs text-red-600">{authError}</p>}
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="password"
-                  value={adminPasswordInput}
-                  onChange={(e) => setAdminPasswordInput(e.target.value)}
-                  placeholder="Admin password"
-                  className="h-9 w-44 text-xs disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
-                />
-                <Button
-                  onClick={handleVerifyAdmin}
-                  disabled={authLoading || !adminPasswordInput.trim()}
-                  className="h-9 min-w-24 cursor-pointer border border-slate-300 bg-slate-50 px-3 text-xs text-slate-700 shadow-sm hover:bg-slate-100"
-                >
-                  {authLoading ? "Checking..." : "Unlock"}
-                </Button>
-              </div>
-            </div>
+            <p className="text-sm text-slate-600">{status}</p>
           </div>
 
           <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -1268,7 +1189,7 @@ export default function PageManager() {
                 <Button
                   size="icon"
                   variant="outline"
-                  onClick={() => copy(selectedSystemUser?.token ?? "")}
+                  onClick={() => copyToClipboard(selectedSystemUser?.token ?? "")}
                   disabled={!selectedSystemUser?.token}
                   className="h-10 w-10 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                   title="Copy selected token"
@@ -1333,7 +1254,7 @@ export default function PageManager() {
               <Button
                 size="icon"
                 variant="outline"
-                onClick={() => copy(accountTokenInput.trim())}
+                onClick={() => copyToClipboard(accountTokenInput.trim())}
                 disabled={!accountTokenInput.trim()}
                 className="h-10 w-10 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                 title="Copy input token"
@@ -1499,7 +1420,7 @@ export default function PageManager() {
                               <Button
                                 size="icon"
                                 variant="outline"
-                                onClick={() => copy(row.id)}
+                                onClick={() => copyToClipboard(row.id)}
                                 className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                 title="Copy page id"
                               >
@@ -1565,7 +1486,7 @@ export default function PageManager() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => void copy(pushedPageIdsInput)}
+                        onClick={() => void copyToClipboard(pushedPageIdsInput)}
                         disabled={!pushedPageIdsInput.trim()}
                         className="h-8 cursor-pointer border-emerald-200 bg-white px-3 text-xs text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:text-emerald-300"
                       >
@@ -1859,7 +1780,7 @@ export default function PageManager() {
                               <Button
                                 size="icon"
                                 variant="outline"
-                                onClick={() => copy(bm.id)}
+                                onClick={() => copyToClipboard(bm.id)}
                                 className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                 title="Copy BM id"
                               >
@@ -1915,7 +1836,7 @@ export default function PageManager() {
                             toast.error("No pages selected")
                             return
                           }
-                          await copy(outsideSelectedIds.join("\n"))
+                          await copyToClipboard(outsideSelectedIds.join("\n"))
                         }}
                         disabled={outsideSelectedPageIds.length === 0}
                         className="h-8 cursor-pointer rounded-r-none border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
@@ -1978,7 +1899,7 @@ export default function PageManager() {
                                 <Button
                                   size="icon"
                                   variant="outline"
-                                  onClick={() => copy(page.id)}
+                                  onClick={() => copyToClipboard(page.id)}
                                   className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                   title="Copy page id"
                                 >
@@ -2055,7 +1976,7 @@ export default function PageManager() {
                                 toast.error("No pages selected")
                                 return
                               }
-                              await copy(bmSelectedIds.join("\n"))
+                              await copyToClipboard(bmSelectedIds.join("\n"))
                             }}
                             disabled={(bmAllSelectedPageIds[bm.id] ?? []).length === 0}
                             className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
@@ -2118,7 +2039,7 @@ export default function PageManager() {
                                 toast.error("No pages selected")
                                 return
                               }
-                              await copy(assignedSelectedIds.join("\n"))
+                              await copyToClipboard(assignedSelectedIds.join("\n"))
                             }}
                             disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0}
                             className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
@@ -2224,7 +2145,7 @@ export default function PageManager() {
                                       <Button
                                         size="icon"
                                         variant="outline"
-                                        onClick={() => copy(row.id)}
+                                        onClick={() => copyToClipboard(row.id)}
                                         className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                         title="Copy page id"
                                       >
@@ -2283,7 +2204,7 @@ export default function PageManager() {
                                     toast.error("No pages selected")
                                     return
                                   }
-                                  await copy(assignedSelectedIds.join("\n"))
+                                  await copyToClipboard(assignedSelectedIds.join("\n"))
                                 }}
                                 disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0}
                                 className="h-8 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50 disabled:cursor-not-allowed"
@@ -2376,7 +2297,7 @@ export default function PageManager() {
                                     <Button
                                       size="icon"
                                       variant="outline"
-                                      onClick={() => copy(row.id)}
+                                      onClick={() => copyToClipboard(row.id)}
                                       className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                       title="Copy assigned page id"
                                     >
@@ -2424,6 +2345,5 @@ export default function PageManager() {
 
         </CardContent>
       </Card>
-    </div>
   )
 }

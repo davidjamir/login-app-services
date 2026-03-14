@@ -76,12 +76,3 @@ export interface FacebookBusiness {
   name: string
   permitted_roles?: string[]
 }
-
-export interface FacebookAuthResponse {
-  status: "connected" | "not_authorized" | "unknown"
-  authResponse?: {
-    accessToken: string
-    expiresIn: number
-    userID: string
-  }
-}

@@ -6,10 +6,9 @@ export async function POST(req: Request) {
     const body = await req.json() as {
       token?: string
       businessId?: string
-      action: "list" | "create" | "update" | "delete" | "assigned-users" | "assign-user" | "remove-user" | "contained-pages" | "add-page" | "remove-page"
+      action: "list" | "update" | "delete" | "assigned-users" | "assign-user" | "remove-user" | "contained-pages" | "add-page" | "remove-page"
       assetGroupId?: string
       name?: string
-      description?: string
       userId?: string
       pageRoles?: string[]
       pageId?: string
@@ -37,19 +36,6 @@ export async function POST(req: Request) {
       case "list": {
         const groups = await facebookService.getBusinessAssetGroups(token, businessId!)
         return NextResponse.json({ success: true, data: groups })
-      }
-
-      case "create": {
-        const name = body.name?.trim()
-        const description = body.description?.trim()
-        if (!name) {
-          return NextResponse.json(
-            { success: false, message: "Name is required" },
-            { status: 400 }
-          )
-        }
-        const result = await facebookService.createBusinessAssetGroup(token, businessId!, name, description)
-        return NextResponse.json({ success: true, data: result, message: "Asset group created" })
       }
 
       case "update": {

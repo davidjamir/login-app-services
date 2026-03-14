@@ -220,36 +220,6 @@ export const facebookService = {
     return merged
   },
 
-  async createBusinessAssetGroup(
-    token: string,
-    businessId: string,
-    name: string,
-    description?: string
-  ): Promise<{ id: string }> {
-    const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(businessId)}/asset_groups`
-    const body = new FormData()
-    body.append("name", name.trim())
-    if (description?.trim()) {
-      body.append("description", description.trim())
-    }
-    body.append("access_token", token)
-
-    const res = await fetch(url, {
-      method: "POST",
-      body,
-    })
-
-    const data = await res.json() as { id?: string; error?: { message?: string } }
-    if (data.error?.message) {
-      throw new Error(data.error.message)
-    }
-    if (!data.id) {
-      throw new Error("Failed to create asset group: no id returned")
-    }
-
-    return { id: data.id }
-  },
-
   async updateBusinessAssetGroup(
     token: string,
     assetGroupId: string,
@@ -497,81 +467,6 @@ export const facebookService = {
     return Array.from(roles)
   },
 
-  async getBusinessAssignedPageIdsForUser(
-    token: string,
-    businessId: string,
-    userId: string
-  ): Promise<string[]> {
-    const url = new URL(`https://graph.facebook.com/${businessId}/assigned_users`)
-    url.searchParams.set("fields", "id,assets.limit(500){id}")
-    url.searchParams.set("access_token", token)
-    url.searchParams.set("limit", LIMIT.toString())
-
-    const res = await fetch(url.toString())
-    if (!res.ok) return []
-
-    const data = await res.json() as {
-      data?: Array<{
-        id?: string
-        assets?: { data?: Array<{ id?: string }> }
-      }>
-      error?: { message?: string }
-    }
-    if (data.error?.message) return []
-
-    const matched = (data.data ?? []).find((item) => item.id === userId)
-    if (!matched) return []
-
-    return (matched.assets?.data ?? [])
-      .map((asset) => asset.id)
-      .filter((id): id is string => Boolean(id))
-  },
-
-  async getAssignedPageIdsByPageAssignedUsersBatch(
-    token: string,
-    userId: string,
-    pageIds: string[]
-  ): Promise<string[]> {
-    if (pageIds.length === 0) return []
-
-    const batch = pageIds.map((pageId) => ({
-      method: "GET",
-      relative_url: `v25.0/${encodeURIComponent(pageId)}/assigned_users?fields=id&limit=500`,
-    }))
-
-    const body = new URLSearchParams()
-    body.set("access_token", token)
-    body.set("batch", JSON.stringify(batch))
-
-    const res = await fetch("https://graph.facebook.com", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-    })
-    if (!res.ok) return []
-
-    const data = await res.json() as Array<{ code?: number; body?: string }>
-    const assigned: string[] = []
-
-    for (let i = 0; i < pageIds.length; i += 1) {
-      const pageId = pageIds[i]
-      const item = data?.[i]
-      if (!item || (item.code ?? 500) >= 400) continue
-
-      try {
-        const parsed = item.body
-          ? (JSON.parse(item.body) as { data?: Array<{ id?: string }> })
-          : undefined
-        const hasUser = (parsed?.data ?? []).some((entry) => entry.id === userId)
-        if (hasUser) assigned.push(pageId)
-      } catch {
-        // Ignore broken item body
-      }
-    }
-
-    return assigned
-  },
-
   async getAssignedPageIdsInBusinessBatch(
     token: string,
     businessId: string,
@@ -672,58 +567,6 @@ export const facebookService = {
   },
 
   async removeSystemUserFromPagesByPageAssignedUsersBatch(
-    pageIds: string[],
-    userId: string,
-    token: string
-  ): Promise<{ successPageIds: string[]; failed: Array<{ pageId: string; message: string }> }> {
-    if (pageIds.length === 0) return { successPageIds: [], failed: [] }
-
-    const batch = pageIds.map((pageId) => ({
-      method: "DELETE",
-      relative_url: `v25.0/${encodeURIComponent(pageId)}/assigned_users?user=${encodeURIComponent(userId)}`,
-    }))
-
-    const body = new URLSearchParams()
-    body.set("access_token", token)
-    body.set("batch", JSON.stringify(batch))
-
-    const res = await fetch("https://graph.facebook.com", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-    })
-
-    if (!res.ok) throw new Error("Failed to remove user permissions by batch request")
-
-    const data = await res.json() as Array<{
-      code?: number
-      body?: string
-    }>
-    const failed: Array<{ pageId: string; message: string }> = []
-    const successPageIds: string[] = []
-
-    for (let i = 0; i < pageIds.length; i += 1) {
-      const pageId = pageIds[i]
-      const item = data?.[i]
-      const code = item?.code ?? 500
-      if (code >= 400) {
-        let message = "Failed to remove permission"
-        try {
-          const parsed = item?.body ? JSON.parse(item.body) as { error?: { message?: string } } : undefined
-          message = parsed?.error?.message || message
-        } catch {
-          // Keep fallback message when body is not valid JSON.
-        }
-        failed.push({ pageId, message })
-      } else {
-        successPageIds.push(pageId)
-      }
-    }
-
-    return { successPageIds, failed }
-  },
-
-  async removeSystemUserFromPagesByPageAssignedUsersBatchLegacy(
     pageIds: string[],
     userId: string,
     token: string

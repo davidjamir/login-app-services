@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
-import { Copy, Loader2, Pencil, Plus, Trash2 } from "lucide-react"
+import { Copy, Loader2, Pencil, Trash2 } from "lucide-react"
+import { copyToClipboard } from "@/lib/copy"
 import { facebookService } from "@/services/facebook.service"
 
 type AssetGroup = { id: string; name: string }
@@ -25,9 +26,6 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
   const [assetGroups, setAssetGroups] = useState<AssetGroup[]>([])
   const [loadingGroups, setLoadingGroups] = useState(false)
   const [groupPageCounts, setGroupPageCounts] = useState<Record<string, number>>({})
-  const [createName, setCreateName] = useState("")
-  const [createDescription, setCreateDescription] = useState("")
-  const [createLoading, setCreateLoading] = useState(false)
   const [editGroupId, setEditGroupId] = useState("")
   const [editName, setEditName] = useState("")
   const [editLoading, setEditLoading] = useState(false)
@@ -171,38 +169,6 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
       active = false
     }
   }, [expandedGroupId, activeToken])
-
-  const handleCreate = async () => {
-    const name = createName.trim()
-    if (!name || !activeToken || !businessId) {
-      toast.error("Name required")
-      return
-    }
-    try {
-      setCreateLoading(true)
-      const res = await fetch("/api/facebook/business/assetGroups", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: activeToken,
-          businessId,
-          action: "create",
-          name,
-          description: createDescription.trim() || undefined,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || data.message || "Create failed")
-      toast.success("Asset group created")
-      setCreateName("")
-      setCreateDescription("")
-      setAssetGroups((prev) => [...prev, { id: data.data?.id ?? "", name }])
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Create failed")
-    } finally {
-      setCreateLoading(false)
-    }
-  }
 
   const handleUpdate = async () => {
     const name = editName.trim()
@@ -426,41 +392,8 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
     }
   }
 
-  const copy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success("Copied")
-    } catch {
-      toast.error("Copy failed")
-    }
-  }
-
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          value={createName}
-          onChange={(e) => setCreateName(e.target.value)}
-          placeholder="Group name"
-          className="h-8 w-48 text-xs"
-        />
-        <Input
-          value={createDescription}
-          onChange={(e) => setCreateDescription(e.target.value)}
-          placeholder="Description (optional)"
-          className="h-8 w-48 text-xs"
-        />
-        <Button
-          size="sm"
-          onClick={() => void handleCreate()}
-          disabled={!createName.trim() || createLoading}
-          className="h-8 cursor-pointer"
-        >
-          {createLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="mr-1 h-4 w-4" />}
-          Create Group
-        </Button>
-      </div>
-
       <div className="space-y-2">
         <p className="text-xs font-medium text-slate-600">Asset Groups</p>
         {loadingGroups ? (
@@ -483,7 +416,7 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
                       size="icon"
                       variant="outline"
                       className="h-6 w-6"
-                      onClick={() => void copy(g.id)}
+                      onClick={() => void copyToClipboard(g.id)}
                     >
                       <Copy className="h-3 w-3" />
                     </Button>
@@ -657,7 +590,7 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
                                         size="icon"
                                         variant="outline"
                                         className="h-5 w-5"
-                                        onClick={() => void copy(p.id)}
+                                        onClick={() => void copyToClipboard(p.id)}
                                       >
                                         <Copy className="h-2.5 w-2.5" />
                                       </Button>
