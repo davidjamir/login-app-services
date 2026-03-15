@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getRolesByMode } from "@/lib/facebook-permissions"
 import { facebookService } from "@/services/facebook.service"
 
 export async function POST(req: Request) {
@@ -84,7 +85,7 @@ export async function POST(req: Request) {
         const userId = body.userId?.trim()
         const pageRoles = Array.isArray(body.pageRoles)
           ? body.pageRoles
-          : ["ANALYZE", "ADVERTISE"]
+          : getRolesByMode("basic")
         if (!assetGroupId || !userId) {
           return NextResponse.json(
             { success: false, message: "Asset Group ID and User ID are required" },

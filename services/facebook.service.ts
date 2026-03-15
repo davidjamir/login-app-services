@@ -1,3 +1,4 @@
+import { getRolesByMode } from "@/lib/facebook-permissions"
 import { FacebookBusiness, FacebookPage, FacebookUser } from "@/types/facebook"
 
 const LIMIT = 200
@@ -291,9 +292,9 @@ export const facebookService = {
     assetGroupId: string,
     businessId: string,
     userId: string,
-    pageRoles: string[] = ["ANALYZE", "ADVERTISE"]
+    pageRoles: string[] = getRolesByMode("basic")
   ): Promise<void> {
-    const url = new URL(`https://graph.facebook.com/v25.0/${assetGroupId}/assigned_users`)
+    const url = new URL(`https://graph.facebook.com/v25.0/${encodeURIComponent(assetGroupId)}/assigned_users`)
     url.searchParams.set("business", businessId)
     url.searchParams.set("user", userId)
     url.searchParams.set("page_roles", JSON.stringify(pageRoles))
@@ -315,7 +316,7 @@ export const facebookService = {
     businessId: string,
     userId: string
   ): Promise<void> {
-    const url = new URL(`https://graph.facebook.com/v25.0/${assetGroupId}/assigned_users`)
+    const url = new URL(`https://graph.facebook.com/v25.0/${encodeURIComponent(assetGroupId)}/assigned_users`)
     url.searchParams.set("business", businessId)
     url.searchParams.set("user", userId)
     url.searchParams.set("access_token", token)
@@ -623,18 +624,11 @@ export const facebookService = {
     businessId: string,
     userId: string,
     token: string,
-    taskMode: "basic" | "manager" | "ads-only" | "post" = "manager"
+    taskMode: "basic" | "full" = "basic"
   ): Promise<{ successPageIds: string[]; failed: Array<{ pageId: string; message: string }> }> {
     if (pageIds.length === 0) return { successPageIds: [], failed: [] }
 
-    const tasks =
-      taskMode === "ads-only"
-        ? ["ADVERTISE", "ANALYZE"]
-        : taskMode === "post"
-          ? ["CREATE_CONTENT"]
-          : taskMode === "basic"
-            ? ["CREATE_CONTENT", "MODERATE", "ADVERTISE", "ANALYZE"]
-            : ["MANAGE", "CREATE_CONTENT", "MODERATE", "ADVERTISE", "ANALYZE"]
+    const tasks = getRolesByMode(taskMode)
     const failed: Array<{ pageId: string; message: string }> = []
     const successPageIds: string[] = []
 
@@ -769,14 +763,11 @@ export const facebookService = {
     pageIds: string[],
     targetBusinessId: string,
     token: string,
-    taskMode: "basic" | "manager" = "basic"
+    taskMode: "basic" | "full" = "basic"
   ): Promise<{ successPageIds: string[]; failed: Array<{ pageId: string; message: string }> }> {
     if (pageIds.length === 0) return { successPageIds: [], failed: [] }
 
-    const permittedTasks =
-      taskMode === "manager"
-        ? ["MANAGE", "CREATE_CONTENT", "MODERATE", "ADVERTISE", "ANALYZE"]
-        : ["MODERATE", "ADVERTISE", "ANALYZE"]
+    const permittedTasks = getRolesByMode(taskMode)
 
     const failed: Array<{ pageId: string; message: string }> = []
     const successPageIds: string[] = []

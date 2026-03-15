@@ -6,12 +6,11 @@ import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { Copy, Loader2, Pencil, Trash2 } from "lucide-react"
 import { copyToClipboard } from "@/lib/copy"
+import { BASIC_LABEL, FULL_LABEL, FULL_ROLES, getRolesByMode } from "@/lib/facebook-permissions"
 import { facebookService } from "@/services/facebook.service"
 
 type AssetGroup = { id: string; name: string }
 type AssignedUser = { id: string; name: string; page_roles?: string[] }
-
-const PAGE_ROLES = ["MANAGE", "CREATE_CONTENT", "MODERATE", "ADVERTISE", "ANALYZE"]
 
 type SystemUserOption = { id: string; name: string }
 
@@ -36,7 +35,7 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
   const [loadingAssigned, setLoadingAssigned] = useState(false)
   const [assignUserId, setAssignUserId] = useState("")
   const [assignUserManualId, setAssignUserManualId] = useState("")
-  const [assignPageRoles, setAssignPageRoles] = useState<string[]>(["CREATE_CONTENT", "MODERATE", "ADVERTISE", "ANALYZE"])
+  const [assignTaskMode, setAssignTaskMode] = useState<"basic" | "full">("basic")
   const [assignLoading, setAssignLoading] = useState(false)
   const [removeLoading, setRemoveLoading] = useState(false)
   const [containedPages, setContainedPages] = useState<Array<{ id: string; name?: string }>>([])
@@ -248,7 +247,7 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
           action: "assign-user",
           assetGroupId: expandedGroupId,
           userId,
-          pageRoles: assignPageRoles,
+          pageRoles: getRolesByMode(assignTaskMode),
         }),
       })
       const data = await res.json()
@@ -479,7 +478,7 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
                               >
                                 <span>
                                   {u.name} • {u.id}
-                                  {u.page_roles?.length ? ` (${u.page_roles.join(", ")})` : ""}
+                                  {u.page_roles?.length ? ` (${FULL_ROLES.every((r) => u.page_roles!.includes(r)) ? "full" : "basic"})` : ""}
                                 </span>
                                 <Button
                                   size="sm"
@@ -497,67 +496,61 @@ export default function AssetGroupBlock({ activeToken, businessId, systemUsers, 
                             )}
                           </div>
                           <p className="mt-2 text-[11px] font-medium text-slate-600">Add user</p>
-                          <div className="mt-1 flex flex-nowrap items-center gap-1 overflow-x-auto">
-                          <select
-                            value={assignUserId}
-                            onChange={(e) => {
-                              setAssignUserId(e.target.value)
-                              if (e.target.value) setAssignUserManualId("")
-                            }}
-                            className="h-8 min-w-0 max-w-[200px] shrink rounded-md border border-slate-300 px-2 text-xs"
-                          >
-                            <option value="">Select user</option>
-                            {tokenOwnerUser && (
-                              <option key={`token-owner-${tokenOwnerUser.id}`} value={tokenOwnerUser.id}>
-                                {tokenOwnerUser.name} • {tokenOwnerUser.id}
+                          <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                            <div className="flex flex-wrap items-center gap-1">
+                              <select
+                                value={assignUserId}
+                                onChange={(e) => {
+                                  setAssignUserId(e.target.value)
+                                  if (e.target.value) setAssignUserManualId("")
+                                }}
+                                className="h-8 min-w-[140px] max-w-[220px] rounded-md border border-slate-300 px-2 text-xs"
+                              >
+                                <option value="">Select user</option>
+                                {tokenOwnerUser && (
+                                  <option key={`token-owner-${tokenOwnerUser.id}`} value={tokenOwnerUser.id}>
+                                    {tokenOwnerUser.name} • {tokenOwnerUser.id}
                               </option>
-                            )}
-                            {systemUsers
-                              .filter((u) => !assignedUsers.some((a) => a.id === u.id))
-                              .map((u) => (
-                                <option key={u.id} value={u.id}>
-                                  {u.name} • {u.id}
-                                </option>
-                              ))}
-                          </select>
-                          <span className="shrink-0 text-xs text-slate-400">or</span>
-                          <Input
-                            value={assignUserManualId}
-                            onChange={(e) => {
-                              setAssignUserManualId(e.target.value)
-                              if (e.target.value.trim()) setAssignUserId("")
-                            }}
-                            placeholder="Enter ID"
-                            className="h-8 w-44 shrink-0 rounded-md px-2 text-xs"
-                          />
-                          <div className="flex shrink-0 flex-wrap gap-0.5">
-                            {PAGE_ROLES.map((r) => (
-                              <label key={r} className="flex items-center gap-0.5 text-[10px]">
-                                <input
-                                  type="checkbox"
-                                  checked={assignPageRoles.includes(r)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setAssignPageRoles((prev) => [...prev, r])
-                                    } else {
-                                      setAssignPageRoles((prev) => prev.filter((x) => x !== r))
-                                    }
-                                  }}
-                                  className="h-3 w-3"
-                                />
-                                {r}
-                              </label>
-                            ))}
+                                )}
+                                {systemUsers
+                                  .filter((u) => !assignedUsers.some((a) => a.id === u.id))
+                                  .map((u) => (
+                                    <option key={u.id} value={u.id}>
+                                      {u.name} • {u.id}
+                                    </option>
+                                  ))}
+                              </select>
+                              <span className="text-xs text-slate-400">or</span>
+                              <Input
+                                value={assignUserManualId}
+                                onChange={(e) => {
+                                  setAssignUserManualId(e.target.value)
+                                  if (e.target.value.trim()) setAssignUserId("")
+                                }}
+                                placeholder="Enter ID"
+                                className="h-8 w-36 rounded-md px-2 text-xs"
+                              />
+                            </div>
+                            <div className="flex min-w-0 flex-1 sm:min-w-[200px]">
+                              <select
+                                value={assignTaskMode}
+                                onChange={(e) => setAssignTaskMode(e.target.value as "basic" | "full")}
+                                className="h-8 w-full min-w-0 truncate rounded-md border border-slate-300 bg-white px-2 text-xs"
+                                title={assignTaskMode === "basic" ? BASIC_LABEL : FULL_LABEL}
+                              >
+                                <option value="basic">{BASIC_LABEL}</option>
+                                <option value="full">{FULL_LABEL}</option>
+                              </select>
+                            </div>
+                            <Button
+                              size="sm"
+                              onClick={() => void handleAssignUser()}
+                              disabled={(!assignUserId && !assignUserManualId.trim()) || assignLoading}
+                              className="h-8 shrink-0 px-3 text-xs"
+                            >
+                              {assignLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Add"}
+                            </Button>
                           </div>
-                          <Button
-                            size="sm"
-                            onClick={() => void handleAssignUser()}
-                            disabled={(!assignUserId && !assignUserManualId.trim()) || assignLoading}
-                            className="h-8 shrink-0 px-3 text-xs"
-                          >
-                            {assignLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Add"}
-                          </Button>
-                        </div>
                         </>
                       )}
                     </div>

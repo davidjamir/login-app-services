@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ClipboardPaste, Copy, RefreshCcw, Trash2 } from "lucide-react"
+import { BASIC_LABEL, FULL_LABEL } from "@/lib/facebook-permissions"
 import { copyToClipboard } from "@/lib/copy"
 import { toast } from "sonner"
 import { facebookService } from "@/services/facebook.service"
@@ -59,12 +60,12 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     | "manage-asset-groups"
   >("add-current-bm")
   const [bulkTargetUserMode, setBulkTargetUserMode] = useState<"system-user" | "manual">("system-user")
-  const [systemUserAssignTaskMode, setSystemUserAssignTaskMode] = useState<"basic" | "manager">("basic")
   const [bulkTargetSystemUserId, setBulkTargetSystemUserId] = useState("")
   const [bulkBmSystemUsers, setBulkBmSystemUsers] = useState<Array<{ id: string; name: string; role?: string }>>([])
   const [bulkBmSystemUsersLoading, setBulkBmSystemUsersLoading] = useState(false)
   const [bulkTargetBmId, setBulkTargetBmId] = useState("")
   const [bulkTargetUserId, setBulkTargetUserId] = useState("")
+  const [taskMode, setTaskMode] = useState<"basic" | "full">("basic")
   const [latestResponses, setLatestResponses] = useState<LatestResponseItem[]>([])
   const [createSystemUserName, setCreateSystemUserName] = useState("")
   const [createSystemUserRole, setCreateSystemUserRole] = useState<"ADMIN" | "EMPLOYEE">("EMPLOYEE")
@@ -678,7 +679,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     selectedIds: string[],
     targetBusinessId: string,
     token: string,
-    taskMode: "basic" | "manager"
+    mode: "basic" | "full"
   ) => {
     try {
       setLoadingData(true)
@@ -686,7 +687,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
         selectedIds,
         targetBusinessId,
         token,
-        taskMode
+        mode
       )
       const pageNameMap = new Map(businessPages.map((page) => [page.id, page.name]))
       setLatestResponses(
@@ -727,7 +728,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     businessId: string,
     userId: string,
     token: string,
-    taskMode: "basic" | "manager" = "basic"
+    mode: "basic" | "full"
   ) => {
     try {
       setLoadingData(true)
@@ -736,7 +737,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
         businessId,
         userId,
         token,
-        taskMode
+        mode
       )
       applyAssignResult(selectedIds, result)
     } catch (error: unknown) {
@@ -835,8 +836,6 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
       return
     }
 
-    const resolvedTaskMode: "basic" | "manager" = systemUserAssignTaskMode
-
     if (bulkActionType === "add-current-bm") {
       const sourceBm = businessRows.find((bm) => bm.id === bulkSourceBmId)
       const existingIdSet = new Set((sourceBm?.pages ?? []).map((page) => page.id))
@@ -864,7 +863,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
         toast.error("Please input target user id")
         return
       }
-      await assignByUserToken(ids, bulkSourceBmId, targetUser, activeToken, resolvedTaskMode)
+      await assignByUserToken(ids, bulkSourceBmId, targetUser, activeToken, taskMode)
       return
     }
 
@@ -891,7 +890,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
         toast.error("Please input target BM id")
         return
       }
-      await sharePagesToOtherBusiness(ids, targetBm, activeToken, resolvedTaskMode)
+      await sharePagesToOtherBusiness(ids, targetBm, activeToken, taskMode)
     }
   }
 
@@ -1659,12 +1658,14 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                     </div>
                   )}
                   {bulkActionType === "share-other-bm" && (
-                    <Input
-                      value={bulkTargetBmId}
-                      onChange={(e) => setBulkTargetBmId(e.target.value)}
-                      placeholder="Target BM ID"
-                      className="h-9 text-xs"
-                    />
+                    <div className="space-y-2">
+                      <Input
+                        value={bulkTargetBmId}
+                        onChange={(e) => setBulkTargetBmId(e.target.value)}
+                        placeholder="Target BM ID"
+                        className="h-9 text-xs"
+                      />
+                    </div>
                   )}
                   {bulkActionType !== "add-current-bm" &&
                     bulkActionType !== "remove-page-current-bm" &&
@@ -1712,16 +1713,12 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                   )}
                   {(bulkActionType === "assign-user-current-bm" || bulkActionType === "share-other-bm") && (
                     <select
-                      value={systemUserAssignTaskMode}
-                      onChange={(e) => setSystemUserAssignTaskMode(e.target.value as "basic" | "manager")}
+                      value={taskMode}
+                      onChange={(e) => setTaskMode(e.target.value as "basic" | "full")}
                       className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
                     >
-                      <option value="basic">
-                        basic: CREATE_CONTENT, MODERATE, ADVERTISE, ANALYZE
-                      </option>
-                      <option value="manager">
-                        manager: MANAGE, CREATE_CONTENT, MODERATE, ADVERTISE, ANALYZE
-                      </option>
+                      <option value="basic">{BASIC_LABEL}</option>
+                      <option value="full">{FULL_LABEL}</option>
                     </select>
                   )}
                   {bulkActionType !== "create-system-user" &&
@@ -2002,7 +1999,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                 bm.id,
                                 activeViewerId,
                                 activeToken,
-                                systemUserAssignTaskMode
+                                taskMode
                               )
                             }}
                             disabled={
