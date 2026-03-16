@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Copy } from "lucide-react"
@@ -15,13 +15,25 @@ type Props = { adminPassword: string; isAdminVerified: boolean }
 export default function FacebookLogin({ adminPassword, isAdminVerified }: Props) {
     const [status, setStatus] = useState("Select a system user to crawl page tokens.")
     const [systemUsers, setSystemUsers] = useState<SystemUser[]>([])
-    const [selectedUserIndex, setSelectedUserIndex] = useState("")
+    const [selectedBmFilter, setSelectedBmFilter] = useState("")
+    const [selectedSystemUserId, setSelectedSystemUserId] = useState("")
     const [pages, setPages] = useState<FacebookPage[]>([])
     const [saving, setSaving] = useState(false)
     const [loadingPages, setLoadingPages] = useState(false)
 
-    const selectedUser =
-        selectedUserIndex !== "" ? systemUsers[Number(selectedUserIndex)] : undefined
+    const bmFilterOptions = useMemo(() => {
+        const seen = new Set<string>()
+        return systemUsers
+            .map((u) => ({ id: (u.businessId ?? "").trim(), name: (u.businessName ?? "—").trim() || "—" }))
+            .filter((bm) => bm.id && !seen.has(bm.id) && seen.add(bm.id))
+    }, [systemUsers])
+
+    const filteredSystemUsers = useMemo(() => {
+        if (!selectedBmFilter) return systemUsers
+        return systemUsers.filter((u) => (u.businessId ?? "").trim() === selectedBmFilter)
+    }, [systemUsers, selectedBmFilter])
+
+    const selectedUser = systemUsers.find((u) => u.id === selectedSystemUserId)
 
     const loadSystemUsers = useCallback(async (password: string) => {
         const res = await fetch("/api/database/systemUsers/secure-list", {
@@ -35,21 +47,31 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
         }
         const users = (data.data ?? []) as SystemUser[]
         setSystemUsers(users)
-        setSelectedUserIndex((prev) => {
-            const index = Number(prev)
-            return Number.isInteger(index) && index >= 0 && index < users.length ? prev : ""
-        })
+        setSelectedSystemUserId((prev) => (users.some((u) => u.id === prev) ? prev : ""))
     }, [])
 
     useEffect(() => {
         if (!isAdminVerified || !adminPassword.trim()) {
             setSystemUsers([])
-            setSelectedUserIndex("")
+            setSelectedBmFilter("")
+            setSelectedSystemUserId("")
             setPages([])
             return
         }
         void loadSystemUsers(adminPassword.trim())
     }, [isAdminVerified, adminPassword, loadSystemUsers])
+
+    useEffect(() => {
+        if (selectedBmFilter && !bmFilterOptions.some((bm) => bm.id === selectedBmFilter)) {
+            setSelectedBmFilter("")
+        }
+    }, [bmFilterOptions, selectedBmFilter])
+
+    useEffect(() => {
+        if (selectedSystemUserId && !filteredSystemUsers.some((u) => u.id === selectedSystemUserId)) {
+            setSelectedSystemUserId("")
+        }
+    }, [selectedBmFilter, filteredSystemUsers, selectedSystemUserId])
 
     useEffect(() => {
         const token = selectedUser?.token
@@ -77,7 +99,7 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
         }
 
         void fetchPages()
-    }, [selectedUserIndex, selectedUser?.token, isAdminVerified])
+    }, [selectedSystemUserId, selectedUser?.token, isAdminVerified])
 
     const shorten = (token?: string) => {
         if (!token) return ''
@@ -139,38 +161,56 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                         <p className="text-sm text-slate-600">{status}</p>
                     </div>
 
-                    <div className="flex flex-col md:flex-row md:items-center gap-3">
+                    <div className="grid grid-cols-[9rem_minmax(0,1fr)_auto] gap-x-2 gap-y-2 items-center">
                         <select
-                            value={selectedUserIndex}
-                            onChange={(e) => setSelectedUserIndex(e.target.value)}
-                            className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm"
+                            value={selectedBmFilter}
+                            onChange={(e) => setSelectedBmFilter(e.target.value)}
+                            className="h-10 w-full rounded-md border border-slate-300 bg-slate-50/80 px-3 text-sm text-slate-700 shadow-sm"
                             disabled={!isAdminVerified || systemUsers.length === 0}
+                            title="Filter by Business Manager"
+                        >
+                            <option value="">All BMs</option>
+                            {bmFilterOptions.map((bm) => (
+                                <option key={bm.id} value={bm.id}>
+                                    {bm.name}
+                                </option>
+                            ))}
+                        </select>
+                        <select
+                            value={selectedSystemUserId}
+                            onChange={(e) => setSelectedSystemUserId(e.target.value)}
+                            className="h-10 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm"
+                            disabled={!isAdminVerified || filteredSystemUsers.length === 0}
                         >
                             <option value="" disabled>
                                 {!isAdminVerified
                                     ? "Please enter admin password first"
-                                    : systemUsers.length === 0
-                                        ? "No system users"
+                                    : filteredSystemUsers.length === 0
+                                        ? selectedBmFilter
+                                            ? "No system users in this BM"
+                                            : "No system users"
                                         : "Select system user (name • app • id)"}
                             </option>
-                            {systemUsers.map((user, index) => (
-                                <option key={index} value={String(index)}>
+                            {filteredSystemUsers.map((user) => (
+                                <option key={user.id} value={user.id}>
                                     {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
                                 </option>
                             ))}
                         </select>
 
-                        <Button
-                            onClick={handlePageSave}
-                            disabled={!isAdminVerified || saving || loadingPages || pages.length === 0}
-                            className={`min-w-36 cursor-pointer border border-slate-300 shadow-sm transition-colors duration-200 ${
-                                saving || loadingPages || pages.length === 0
-                                    ? "bg-white text-slate-400 hover:bg-white"
-                                    : "bg-slate-50 text-slate-700 hover:bg-slate-100"
-                            }`}
-                        >
-                            {saving ? "Saving..." : "Save Page Token"}
-                        </Button>
+                        <div className="flex items-center">
+                            <Button
+                                onClick={handlePageSave}
+                                disabled={!isAdminVerified || saving || loadingPages || pages.length === 0}
+                                className={`min-w-36 cursor-pointer border border-slate-300 shadow-sm transition-colors duration-200 ${
+                                    saving || loadingPages || pages.length === 0
+                                        ? "bg-white text-slate-400 hover:bg-white"
+                                        : "bg-slate-50 text-slate-700 hover:bg-slate-100"
+                                }`}
+                            >
+                                {saving ? "Saving..." : "Save Page Token"}
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="space-y-3">
