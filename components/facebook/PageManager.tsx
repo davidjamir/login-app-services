@@ -1798,10 +1798,11 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                 />
                                 <select
                                   value={(() => {
-                                    const domain = editPageEmail.includes("@")
+                                    const domain = (editPageEmail.includes("@")
                                       ? editPageEmail.split("@").pop() ?? ""
                                       : editPageEmail
-                                    return EMAIL_ORIGINS.includes(domain) ? domain : ""
+                                    ).toLowerCase()
+                                    return EMAIL_ORIGINS.find((o) => o.toLowerCase() === domain) ?? ""
                                   })()}
                                   onChange={(e) => {
                                     const v = e.target.value
@@ -2615,10 +2616,11 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                               />
                               <select
                                 value={(() => {
-                                  const domain = editPageEmail.includes("@")
+                                  const domain = (editPageEmail.includes("@")
                                     ? editPageEmail.split("@").pop() ?? ""
                                     : editPageEmail
-                                  return EMAIL_ORIGINS.includes(domain) ? domain : ""
+                                  ).toLowerCase()
+                                  return EMAIL_ORIGINS.find((o) => o.toLowerCase() === domain) ?? ""
                                 })()}
                                 onChange={(e) => {
                                   const v = e.target.value

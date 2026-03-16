@@ -525,7 +525,7 @@ export const facebookService = {
     if (updates.category !== undefined) body.append("category", updates.category)
     if (updates.website !== undefined) body.append("website", updates.website)
     if (updates.phone !== undefined) body.append("phone", updates.phone)
-    if (updates.email !== undefined) body.append("email", updates.email)
+    if (updates.email !== undefined) body.append("emails", JSON.stringify([updates.email]))
     if (updates.location !== undefined) {
       const loc = updates.location
       if (loc.street !== undefined) body.append("location[street]", loc.street)
