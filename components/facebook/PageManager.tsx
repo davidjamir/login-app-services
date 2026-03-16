@@ -159,7 +159,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
   const [editPageCity, setEditPageCity] = useState("")
   const [editPageZip, setEditPageZip] = useState("")
   const [editPageCountry, setEditPageCountry] = useState("USA")
-  const [editPageEmail, setEditPageEmail] = useState("contact@nflhub.store")
+  const [editPageEmail, setEditPageEmail] = useState("")
   const [editPageLoading, setEditPageLoading] = useState(false)
   const [editPageInfoLoading, setEditPageInfoLoading] = useState(false)
   const [editPageSearchQuery, setEditPageSearchQuery] = useState("")
@@ -926,7 +926,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
       setEditPageCountry(country || "USA")
       setEditPageAddress([street, city, zip, country].filter(Boolean).join(", "))
       const loadedEmail = info.emails?.[0] ?? ""
-      setEditPageEmail(loadedEmail || "contact@nflhub.store")
+      setEditPageEmail(loadedEmail || "")
       const rawWebsite = (info.website ?? "").trim()
       const normWebsite = rawWebsite && !/^https?:\/\//i.test(rawWebsite) ? `https://${rawWebsite}` : rawWebsite
       setEditPageOriginal({
@@ -939,7 +939,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
         city,
         zip,
         country: country || "USA",
-        email: loadedEmail || "contact@nflhub.store",
+        email: loadedEmail || "",
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load page info")
@@ -1806,7 +1806,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                   })()}
                                   onChange={(e) => {
                                     const v = e.target.value
-                                    if (v) setEditPageEmail(`contact@${v}`)
+                                    setEditPageEmail(v ? `contact@${v}` : "")
                                   }}
                                   className="h-8 w-[140px] shrink-0 rounded-md border border-slate-300 bg-white px-2 text-xs"
                                 >
@@ -2624,7 +2624,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                 })()}
                                 onChange={(e) => {
                                   const v = e.target.value
-                                  if (v) setEditPageEmail(`contact@${v}`)
+                                  setEditPageEmail(v ? `contact@${v}` : "")
                                 }}
                                 className="h-8 w-[140px] shrink-0 rounded-md border border-slate-300 bg-white px-2 text-xs"
                               >
