@@ -1,17 +1,20 @@
 'use client'
 
 import Image from "next/image"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ClipboardPaste, Copy, RefreshCcw, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronUp, ClipboardPaste, Copy, RefreshCcw, Search, Trash2 } from "lucide-react"
 import { BASIC_LABEL, FULL_LABEL } from "@/lib/facebook-permissions"
 import { copyToClipboard } from "@/lib/copy"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { facebookService } from "@/services/facebook.service"
 import { FacebookBusiness, FacebookPage, SystemUser } from "@/types/facebook"
 import AssetGroupBlock from "@/components/facebook/AssetGroupBlock"
+import EditPageListItem from "@/components/facebook/EditPageListItem"
+import PageTableRow from "@/components/facebook/PageTableRow"
 
 type SourceMode = "system-user" | "account-user"
 type BusinessPageRow = FacebookPage & {
@@ -26,6 +29,46 @@ type LatestResponseItem = {
   message: string
 }
 
+const PHONE_COUNTRY_CODES = [
+  { value: "+1", label: "+1 (US/CA)" },
+  { value: "+44", label: "+44 (UK)" },
+  { value: "+84", label: "+84 (VN)" },
+  { value: "+81", label: "+81 (JP)" },
+  { value: "+86", label: "+86 (CN)" },
+  { value: "+91", label: "+91 (IN)" },
+  { value: "+49", label: "+49 (DE)" },
+  { value: "+33", label: "+33 (FR)" },
+  { value: "+39", label: "+39 (IT)" },
+  { value: "+34", label: "+34 (ES)" },
+  { value: "+61", label: "+61 (AU)" },
+  { value: "+82", label: "+82 (KR)" },
+  { value: "+65", label: "+65 (SG)" },
+  { value: "+66", label: "+66 (TH)" },
+  { value: "+63", label: "+63 (PH)" },
+  { value: "+60", label: "+60 (MY)" },
+  { value: "+62", label: "+62 (ID)" },
+  { value: "+55", label: "+55 (BR)" },
+  { value: "+52", label: "+52 (MX)" },
+  { value: "+7", label: "+7 (RU)" },
+]
+
+const ACCOUNT_TOKEN_STORAGE_KEY = "page-manager-account-token"
+
+const EMAIL_ORIGINS = [
+  "nflhub.store",
+  "nbahub.store",
+  "mlbhub.store",
+  "nhlhub.store",
+  "thetimenews.us",
+  "thetimenews.site",
+  "thetimenews.co",
+  "thetimenews.store",
+  "thedailysports.site",
+  "dailysportnews.online",
+  "thecryptonews.space",
+  "imagetimes.space",
+]
+
 type Props = { adminPassword: string; isAdminVerified: boolean }
 
 export default function PageManager({ adminPassword, isAdminVerified }: Props) {
@@ -35,6 +78,12 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
   const [selectedUserIndex, setSelectedUserIndex] = useState("")
   const [selectedAdminUserIndex, setSelectedAdminUserIndex] = useState("")
   const [accountTokenInput, setAccountTokenInput] = useState("")
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const saved = localStorage.getItem(ACCOUNT_TOKEN_STORAGE_KEY)
+    if (saved) setAccountTokenInput(saved)
+  }, [])
 
   const [loadingData, setLoadingData] = useState(false)
   const [businesses, setBusinesses] = useState<FacebookBusiness[]>([])
@@ -58,6 +107,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     | "create-system-user"
     | "edit-system-user"
     | "manage-asset-groups"
+    | "edit-page-info"
   >("add-current-bm")
   const [bulkTargetUserMode, setBulkTargetUserMode] = useState<"system-user" | "manual">("system-user")
   const [bulkTargetSystemUserId, setBulkTargetSystemUserId] = useState("")
@@ -77,6 +127,39 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     Array<{ id: string; name: string; role?: string }>
   >([])
   const [createBmSystemUsersLoading, setCreateBmSystemUsersLoading] = useState(false)
+  const [editPageId, setEditPageId] = useState("")
+  const [editPageAbout, setEditPageAbout] = useState("")
+  const [editPageDescription, setEditPageDescription] = useState("")
+  const [editPageCategoryList, setEditPageCategoryList] = useState<Array<{ id: string; name: string }>>([])
+  const [editPageWebsite, setEditPageWebsite] = useState("")
+  const [editPagePhone, setEditPagePhone] = useState("")
+  const [editPagePhoneCode, setEditPagePhoneCode] = useState("+1")
+  const [editPageAddress, setEditPageAddress] = useState("")
+  const [editPageStreet, setEditPageStreet] = useState("")
+  const [editPageCity, setEditPageCity] = useState("")
+  const [editPageZip, setEditPageZip] = useState("")
+  const [editPageCountry, setEditPageCountry] = useState("USA")
+  const [editPageEmail, setEditPageEmail] = useState("contact@nflhub.store")
+  const [editPageLoading, setEditPageLoading] = useState(false)
+  const [editPageInfoLoading, setEditPageInfoLoading] = useState(false)
+  const [editPageSearchQuery, setEditPageSearchQuery] = useState("")
+  const [editPageBlockCollapsed, setEditPageBlockCollapsed] = useState(false)
+  const [systemUserManagePageInfoVisible, setSystemUserManagePageInfoVisible] = useState(false)
+  const [editPageOriginal, setEditPageOriginal] = useState<{
+    about: string
+    description: string
+    website: string
+    phoneCode: string
+    phone: string
+    street: string
+    city: string
+    zip: string
+    country: string
+    email: string
+  } | null>(null)
+
+  const lastCrawledTokenRef = useRef<string>("")
+  const loadingPageIdRef = useRef<string>("")
 
   const selectedSystemUser =
     selectedUserIndex !== "" ? systemUsers[Number(selectedUserIndex)] : undefined
@@ -148,7 +231,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
   const allowedBulkActions = useMemo(() => {
     if (!selectedBulkSourceBm) {
       return [] as Array<{
-        value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups"
+        value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups" | "edit-page-info"
         label: string
       }>
     }
@@ -166,14 +249,15 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
         { value: "create-system-user", label: "Create System User" },
         { value: "edit-system-user", label: "Edit System User" },
         { value: "manage-asset-groups", label: "Manage Asset Groups" },
+        { value: "edit-page-info", label: "Manage Page Info" },
       ] as Array<{
-        value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups"
+        value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups" | "edit-page-info"
         label: string
       }>
     }
 
     return [] as Array<{
-      value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups"
+      value: "share-other-bm" | "add-current-bm" | "assign-user-current-bm" | "remove-user-current-bm" | "remove-page-current-bm" | "create-system-user" | "edit-system-user" | "manage-asset-groups" | "edit-page-info"
       label: string
     }>
   }, [selectedBulkSourceBm])
@@ -185,13 +269,11 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
   }, [allowedBulkActions, bulkActionType])
 
   useEffect(() => {
-    if (
-      mode !== "account-user" ||
-      !isAdminVerified ||
-      !activeToken ||
-      !bulkSourceBmId ||
-      bulkTargetUserMode !== "system-user"
-    ) {
+    if (!isAdminVerified || !activeToken || !bulkSourceBmId) {
+      setCreateBmSystemUsers([])
+      setCreateBmSystemUsersLoading(false)
+      setEditSystemUserId("")
+      setEditSystemUserName("")
       setBulkBmSystemUsers([])
       setBulkTargetSystemUserId("")
       setBulkBmSystemUsersLoading(false)
@@ -199,11 +281,13 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     }
 
     let active = true
+    setCreateBmSystemUsersLoading(true)
     setBulkBmSystemUsersLoading(true)
     void facebookService
       .getBusinessSystemUsers(activeToken, bulkSourceBmId)
       .then((users) => {
         if (!active) return
+        setCreateBmSystemUsers(users)
         setBulkBmSystemUsers(users)
         setBulkTargetSystemUserId((prev) =>
           users.some((user) => user.id === prev) ? prev : ""
@@ -211,43 +295,14 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
       })
       .catch(() => {
         if (!active) return
+        setCreateBmSystemUsers([])
         setBulkBmSystemUsers([])
         setBulkTargetSystemUserId("")
       })
       .finally(() => {
         if (!active) return
-        setBulkBmSystemUsersLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [mode, isAdminVerified, activeToken, bulkSourceBmId, bulkTargetUserMode])
-
-  useEffect(() => {
-    if (!isAdminVerified || !activeToken || !bulkSourceBmId) {
-      setCreateBmSystemUsers([])
-      setCreateBmSystemUsersLoading(false)
-      setEditSystemUserId("")
-      setEditSystemUserName("")
-      return
-    }
-
-    let active = true
-    setCreateBmSystemUsersLoading(true)
-    void facebookService
-      .getBusinessSystemUsers(activeToken, bulkSourceBmId)
-      .then((users) => {
-        if (!active) return
-        setCreateBmSystemUsers(users)
-      })
-      .catch(() => {
-        if (!active) return
-        setCreateBmSystemUsers([])
-      })
-      .finally(() => {
-        if (!active) return
         setCreateBmSystemUsersLoading(false)
+        setBulkBmSystemUsersLoading(false)
       })
 
     return () => {
@@ -424,7 +479,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
         toast.error("Missing account user context")
         return
       }
-      await deleteByUserTokenLegacy(selectedPageIds, activeViewerId, activeToken)
+      await deleteByUserToken(selectedPageIds, activeViewerId, activeToken)
       return
     }
 
@@ -439,23 +494,6 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
   }
 
   const deleteByUserToken = async (selectedIds: string[], userId: string, token: string) => {
-    try {
-      setLoadingData(true)
-      const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatch(
-        selectedIds,
-        userId,
-        token
-      )
-      applyDeleteResult(selectedIds, result)
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error"
-      applyDeleteError(selectedIds, message)
-    } finally {
-      setLoadingData(false)
-    }
-  }
-
-  const deleteByUserTokenLegacy = async (selectedIds: string[], userId: string, token: string) => {
     try {
       setLoadingData(true)
       const result = await facebookService.removeSystemUserFromPagesByPageAssignedUsersBatch(
@@ -781,6 +819,206 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     await crawlPages(activeToken)
   }
 
+  const handleAddressInputChange = (raw: string) => {
+    setEditPageAddress(raw)
+    const parts = raw.split(",").map((p) => p.trim())
+    setEditPageStreet(parts[0] ?? "")
+    setEditPageCity(parts[1] ?? "")
+    setEditPageZip(parts[2] ?? "")
+    setEditPageCountry(parts[3] ?? "USA")
+  }
+
+  const handleAddressPartChange = (
+    field: "street" | "city" | "zip" | "country",
+    value: string
+  ) => {
+    if (field === "street") setEditPageStreet(value)
+    else if (field === "city") setEditPageCity(value)
+    else if (field === "zip") setEditPageZip(value)
+    else setEditPageCountry(value || "USA")
+    const street = field === "street" ? value : editPageStreet
+    const city = field === "city" ? value : editPageCity
+    const zip = field === "zip" ? value : editPageZip
+    const country = field === "country" ? value : editPageCountry
+    setEditPageAddress([street, city, zip, country].filter(Boolean).join(", "))
+  }
+
+  const handleEmailInputChange = (raw: string) => {
+    setEditPageEmail(raw)
+  }
+
+  const handleWebsiteInputChange = (raw: string) => {
+    if (!raw.trim()) {
+      setEditPageWebsite(raw)
+      return
+    }
+    setEditPageWebsite(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
+  }
+
+  const handlePhoneInputChange = (raw: string) => {
+    const trimmed = raw.trim()
+    const matchedCode = [...PHONE_COUNTRY_CODES]
+      .sort((a, b) => b.value.length - a.value.length)
+      .find((c) => trimmed.startsWith(c.value))
+    if (matchedCode) {
+      setEditPagePhoneCode(matchedCode.value)
+      setEditPagePhone(trimmed.slice(matchedCode.value.length).replace(/^\s+/, ""))
+    } else {
+      setEditPagePhone(raw)
+    }
+  }
+
+  const handleLoadEditPageInfo = async (pageId: string) => {
+    if (!pageId || !activeToken) return
+    loadingPageIdRef.current = pageId
+    setEditPageInfoLoading(true)
+    try {
+      const info = await facebookService.getPageInfo(activeToken, pageId)
+      if (loadingPageIdRef.current !== pageId) return
+      setEditPageAbout(info.about ?? "")
+      setEditPageDescription(info.description ?? "")
+      setEditPageCategoryList(info.category_list ?? [])
+      setEditPageWebsite(info.website ?? "")
+      const rawPhone = (info.phone ?? "").trim()
+      const matchedCode = [...PHONE_COUNTRY_CODES]
+        .sort((a, b) => b.value.length - a.value.length)
+        .find((c) => rawPhone.startsWith(c.value))
+      if (matchedCode) {
+        setEditPagePhoneCode(matchedCode.value)
+        setEditPagePhone(rawPhone.slice(matchedCode.value.length).replace(/^\s+/, "") ?? "")
+      } else {
+        setEditPagePhoneCode("+1")
+        setEditPagePhone(rawPhone)
+      }
+      const loc = info.location
+      const street = loc?.street ?? ""
+      const city = loc?.city ?? ""
+      const zip = loc?.zip ?? ""
+      const country = loc?.country ?? "USA"
+      setEditPageStreet(street)
+      setEditPageCity(city)
+      setEditPageZip(zip)
+      setEditPageCountry(country || "USA")
+      setEditPageAddress([street, city, zip, country].filter(Boolean).join(", "))
+      const loadedEmail = info.emails?.[0] ?? ""
+      setEditPageEmail(loadedEmail || "contact@nflhub.store")
+      const rawWebsite = (info.website ?? "").trim()
+      const normWebsite = rawWebsite && !/^https?:\/\//i.test(rawWebsite) ? `https://${rawWebsite}` : rawWebsite
+      setEditPageOriginal({
+        about: info.about ?? "",
+        description: info.description ?? "",
+        website: normWebsite,
+        phoneCode: matchedCode?.value ?? "+1",
+        phone: matchedCode ? (rawPhone.slice(matchedCode.value.length).replace(/^\s+/, "") ?? "") : rawPhone,
+        street,
+        city,
+        zip,
+        country: country || "USA",
+        email: loadedEmail || "contact@nflhub.store",
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load page info")
+      setEditPageOriginal(null)
+    } finally {
+      setEditPageInfoLoading(false)
+    }
+  }
+
+  const hasEditPageChanges = useMemo(() => {
+    if (!editPageOriginal) return false
+    const websiteVal = editPageWebsite.trim()
+    const normWebsite = websiteVal && !/^https?:\/\//i.test(websiteVal) ? `https://${websiteVal}` : websiteVal
+    const phoneVal = editPagePhone.trim()
+    const fullPhone = phoneVal ? `${editPagePhoneCode}${phoneVal}` : ""
+    return (
+      (editPageAbout ?? "") !== editPageOriginal.about ||
+      (editPageDescription ?? "") !== editPageOriginal.description ||
+      normWebsite !== editPageOriginal.website ||
+      fullPhone !== `${editPageOriginal.phoneCode}${editPageOriginal.phone}` ||
+      (editPageStreet ?? "") !== editPageOriginal.street ||
+      (editPageCity ?? "") !== editPageOriginal.city ||
+      (editPageZip ?? "") !== editPageOriginal.zip ||
+      (editPageCountry ?? "") !== editPageOriginal.country ||
+      (editPageEmail ?? "").trim() !== editPageOriginal.email
+    )
+  }, [
+    editPageOriginal,
+    editPageAbout,
+    editPageDescription,
+    editPageWebsite,
+    editPagePhoneCode,
+    editPagePhone,
+    editPageStreet,
+    editPageCity,
+    editPageZip,
+    editPageCountry,
+    editPageEmail,
+  ])
+
+  const handleSaveEditPageInfo = async () => {
+    if (!editPageId || !activeToken) return
+    if (!hasEditPageChanges) {
+      toast.error("No changes to save")
+      return
+    }
+    setEditPageLoading(true)
+    try {
+      const websiteValue = editPageWebsite.trim()
+      const websiteUrl = websiteValue
+        ? /^https?:\/\//i.test(websiteValue)
+          ? websiteValue
+          : `https://${websiteValue}`
+        : undefined
+      const phoneNumber = editPagePhone.trim()
+      const phoneValue = phoneNumber ? `${editPagePhoneCode}${phoneNumber}` : undefined
+      const updates: Parameters<typeof facebookService.updatePageInfo>[2] = {
+        about: editPageAbout || undefined,
+        description: editPageDescription || undefined,
+        website: websiteUrl,
+        phone: phoneValue,
+        email: (() => {
+          const v = editPageEmail.trim()
+          if (!v) return undefined
+          return v.includes("@") ? v : `contact@${v}`
+        })(),
+      }
+      const hasAddress =
+        editPageStreet.trim() ||
+        editPageCity.trim() ||
+        editPageZip.trim() ||
+        editPageCountry.trim()
+      if (hasAddress) {
+        updates.location = {
+          street: editPageStreet.trim() || undefined,
+          city: editPageCity.trim() || undefined,
+          zip: editPageZip.trim() || undefined,
+          country: editPageCountry.trim() || undefined,
+        }
+      }
+      await facebookService.updatePageInfo(activeToken, editPageId, updates)
+      const websiteVal = (websiteUrl ?? editPageWebsite.trim()) || ""
+      const normWebsite =
+        websiteVal && !/^https?:\/\//i.test(websiteVal) ? `https://${websiteVal}` : websiteVal
+      setEditPageOriginal({
+        about: editPageAbout ?? "",
+        description: editPageDescription ?? "",
+        website: normWebsite ?? "",
+        phoneCode: editPagePhoneCode,
+        phone: editPagePhone.trim(),
+        street: editPageStreet.trim(),
+        city: editPageCity.trim(),
+        zip: editPageZip.trim(),
+        country: editPageCountry.trim(),
+        email: (editPageEmail ?? "").trim(),
+      })
+      toast.success("Page updated")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update page")
+    } finally {
+      setEditPageLoading(false)
+    }
+  }
+
   const handleCopyLatestResponse = async () => {
     if (latestResponses.length === 0) return
 
@@ -991,7 +1229,9 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
       setBmAllSelectedPageIds({})
       setBmAssignedSelectedPageIds({})
       setStatus("Crawl success.")
+      lastCrawledTokenRef.current = token
     } catch (err: unknown) {
+      lastCrawledTokenRef.current = token
       const message = err instanceof Error ? err.message : "Unknown error"
       setBusinesses([])
       setBusinessPages([])
@@ -1020,6 +1260,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
       setOutsideSelectedPageIds([])
       setBmAllSelectedPageIds({})
       setBmAssignedSelectedPageIds({})
+      lastCrawledTokenRef.current = ""
       return
     }
 
@@ -1034,15 +1275,25 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
       setBmAllSelectedPageIds({})
       setBmAssignedSelectedPageIds({})
       setStatus("Select source and token to auto crawl pages.")
+      lastCrawledTokenRef.current = ""
+      return
+    }
+
+    if (mode === "system-user") {
+      setStatus("Click Manage Page Info or Refresh to load pages.")
+      return
+    }
+
+    if (lastCrawledTokenRef.current === activeToken && businesses.length > 0) {
       return
     }
 
     const timeout = setTimeout(() => {
       void crawlPages(activeToken)
-    }, 1200)
+    }, 2000)
 
     return () => clearTimeout(timeout)
-  }, [isAdminVerified, activeToken])
+  }, [isAdminVerified, activeToken, businesses.length, mode])
 
   useEffect(() => {
     setSelectedPageIds((prev) => prev.filter((id) => allPageIds.includes(id)))
@@ -1139,7 +1390,17 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
           <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             <Button
               variant="outline"
-              onClick={() => setMode("system-user")}
+              onClick={() => {
+                setMode("system-user")
+                setSystemUserManagePageInfoVisible(false)
+                setBusinesses([])
+                setBusinessPages([])
+                setAssignedPageIdsByBusiness({})
+                setAllManagedPages([])
+                setOutsidePages([])
+                setSelectedPageIds([])
+                lastCrawledTokenRef.current = ""
+              }}
               disabled={!isAdminVerified}
               className={`h-9 cursor-pointer rounded-lg border-slate-200 px-4 ${
                 mode === "system-user"
@@ -1151,7 +1412,13 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
             </Button>
             <Button
               variant="outline"
-              onClick={() => setMode("account-user")}
+              onClick={() => {
+                setMode("account-user")
+                setSystemUserManagePageInfoVisible(false)
+                setEditPageId("")
+                setEditPageSearchQuery("")
+                setEditPageOriginal(null)
+              }}
               disabled={!isAdminVerified}
               className={`h-9 cursor-pointer rounded-lg border-slate-200 px-4 ${
                 mode === "account-user"
@@ -1208,8 +1475,8 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                 </Button>
               </div>
               <div className="mt-2 space-y-1">
-                <div className="flex items-center gap-2">
-                  <p className="w-36 text-xs text-slate-600">Select System Admin</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="w-36 shrink-0 text-xs text-slate-600">Select System Admin</p>
                   <select
                     value={selectedAdminUserIndex}
                     onChange={(e) => setSelectedAdminUserIndex(e.target.value)}
@@ -1235,17 +1502,320 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                       </option>
                     ))}
                   </select>
+                  <Button
+                    size="sm"
+                    variant={systemUserManagePageInfoVisible ? "secondary" : "outline"}
+                    onClick={async () => {
+                      const next = !systemUserManagePageInfoVisible
+                      setSystemUserManagePageInfoVisible(next)
+                      if (next && selectedSystemUser?.token) {
+                        await handleRefreshPages()
+                      }
+                    }}
+                    disabled={!selectedSystemUser?.token}
+                    className={cn(
+                      "ml-auto h-8 cursor-pointer px-3 text-xs disabled:cursor-not-allowed",
+                      systemUserManagePageInfoVisible
+                        ? "border border-slate-300 bg-slate-100 hover:bg-slate-200"
+                        : "border-slate-300 bg-white hover:bg-slate-50"
+                    )}
+                    title={systemUserManagePageInfoVisible ? "Hide Manage Page Info" : "Show Manage Page Info and load pages"}
+                  >
+                    Manage Page Info
+                    {systemUserManagePageInfoVisible ? (
+                      <ChevronUp className="ml-1 h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                    )}
+                  </Button>
                 </div>
                 <p className="mt-1 text-[11px] text-slate-600">
                   <span className="font-semibold text-slate-800">Note:</span> Delete works only when the selected system user and system admin are in the same app.
                 </p>
+                {systemUserManagePageInfoVisible && (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div
+                    className="mb-4 flex cursor-pointer items-center justify-between gap-3"
+                    onClick={() => setEditPageBlockCollapsed((c) => !c)}
+                    onKeyDown={(e) => e.key === "Enter" && setEditPageBlockCollapsed((c) => !c)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <h3 className="text-lg font-semibold tracking-tight">Manage Page Info</h3>
+                      {editPageBlockCollapsed ? (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                      ) : (
+                        <ChevronUp className="h-4 w-4 shrink-0 text-slate-500" />
+                      )}
+                    </div>
+                    <div
+                      className="relative w-56 shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        value={editPageSearchQuery}
+                        onChange={(e) => setEditPageSearchQuery(e.target.value)}
+                        placeholder="Search by name or ID..."
+                        className="h-9 pl-8 text-xs"
+                      />
+                    </div>
+                  </div>
+                  {activeToken && (() => {
+                    const editPageOptions = allManagedPages
+                    if (editPageOptions.length === 0) {
+                      return (
+                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                          No pages from /me/accounts. Click Refresh to load pages for this system user.
+                        </p>
+                      )
+                    }
+                    const filteredOptions = editPageSearchQuery.trim()
+                      ? editPageOptions.filter(
+                          (p) =>
+                            p.name.toLowerCase().includes(editPageSearchQuery.trim().toLowerCase()) ||
+                            p.id.includes(editPageSearchQuery.trim())
+                        )
+                      : editPageOptions
+                    return (
+                      <div className="space-y-3">
+                        <div className="max-h-80 overflow-y-auto rounded-md border border-slate-200 bg-white">
+                          {filteredOptions.length === 0 ? (
+                            <p className="p-3 text-center text-xs text-slate-500">No pages match</p>
+                          ) : (
+                            <ul className="divide-y divide-slate-100">
+                              {filteredOptions.map((p) => (
+                                <EditPageListItem
+                                  key={p.id}
+                                  page={p}
+                                  isSelected={editPageId === p.id}
+                                  isLoading={editPageInfoLoading && editPageId === p.id}
+                                  disabled={!activeToken || editPageInfoLoading}
+                                  onSelect={() => {
+                                    setEditPageId(p.id)
+                                    loadingPageIdRef.current = p.id
+                                    void handleLoadEditPageInfo(p.id)
+                                  }}
+                                />
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                        {!editPageBlockCollapsed && editPageId && (
+                          <div className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2">
+                            <div className="space-y-4">
+                              <div>
+                                <label className="text-[11px] text-slate-500">About</label>
+                                <Input
+                                  value={editPageAbout}
+                                  onChange={(e) => setEditPageAbout(e.target.value)}
+                                  placeholder="About"
+                                  className="mt-0.5 h-8 w-full text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] text-slate-500">Category</label>
+                                <div className="mt-0.5 min-h-8 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                  {editPageCategoryList.length > 0
+                                    ? editPageCategoryList.map((c) => c.name).join(", ")
+                                    : "—"}
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-[11px] text-slate-500">Address</label>
+                                <div className="mt-0.5 flex gap-2">
+                                  <Input
+                                    value={editPageAddress}
+                                    onChange={(e) => handleAddressInputChange(e.target.value)}
+                                    onPaste={(e) => {
+                                      const text = e.clipboardData.getData("text")
+                                      e.preventDefault()
+                                      handleAddressInputChange(text)
+                                    }}
+                                    placeholder="Street, city, zip, country"
+                                    className="h-8 flex-1 text-xs"
+                                  />
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      try {
+                                        const text = await navigator.clipboard.readText()
+                                        handleAddressInputChange(text)
+                                        toast.success("Address pasted and split")
+                                      } catch {
+                                        toast.error("Failed to read clipboard")
+                                      }
+                                    }}
+                                    className="h-8 w-8 shrink-0 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                                    title="Paste"
+                                  >
+                                    <ClipboardPaste className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setEditPageAddress("")
+                                      setEditPageStreet("")
+                                      setEditPageCity("")
+                                      setEditPageZip("")
+                                      setEditPageCountry("USA")
+                                      toast.success("Address cleared")
+                                    }}
+                                    className="h-8 w-8 shrink-0 cursor-pointer border-red-300 bg-red-50 text-red-600 hover:bg-red-100"
+                                    title="Clear"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  <div>
+                                    <label className="text-[10px] text-slate-400">Street</label>
+                                    <Input
+                                      value={editPageStreet}
+                                      onChange={(e) => handleAddressPartChange("street", e.target.value)}
+                                      placeholder="Street"
+                                      className="mt-0.5 h-8 text-xs"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] text-slate-400">City</label>
+                                    <Input
+                                      value={editPageCity}
+                                      onChange={(e) => handleAddressPartChange("city", e.target.value)}
+                                      placeholder="City"
+                                      className="mt-0.5 h-8 text-xs"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] text-slate-400">Zip</label>
+                                    <Input
+                                      value={editPageZip}
+                                      onChange={(e) => handleAddressPartChange("zip", e.target.value)}
+                                      placeholder="Zip"
+                                      className="mt-0.5 h-8 text-xs"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] text-slate-400">Country</label>
+                                    <Input
+                                      value={editPageCountry}
+                                      onChange={(e) => handleAddressPartChange("country", e.target.value)}
+                                      placeholder="Country"
+                                      className="mt-0.5 h-8 text-xs"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="space-y-4">
+                              <div>
+                                <label className="text-[11px] text-slate-500">Description</label>
+                                <Input
+                                  value={editPageDescription}
+                                  onChange={(e) => setEditPageDescription(e.target.value)}
+                                  placeholder="Description"
+                                  className="mt-0.5 h-8 w-full text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] text-slate-500">Website</label>
+                                <Input
+                                  value={editPageWebsite}
+                                  onChange={(e) => handleWebsiteInputChange(e.target.value)}
+                                  placeholder="example.com or sub.example.com"
+                                  className="mt-0.5 h-8 w-full text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] text-slate-500">Phone</label>
+                                <div className="mt-0.5 flex gap-2">
+                                  <select
+                                    value={editPagePhoneCode}
+                                    onChange={(e) => setEditPagePhoneCode(e.target.value)}
+                                    className="h-8 w-[110px] shrink-0 rounded-md border border-slate-300 bg-white px-2 text-xs"
+                                  >
+                                    {PHONE_COUNTRY_CODES.map((c) => (
+                                      <option key={c.value} value={c.value}>
+                                        {c.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <Input
+                                  value={editPagePhone}
+                                  onChange={(e) => handlePhoneInputChange(e.target.value)}
+                                  placeholder="Phone number"
+                                  className="h-8 flex-1 text-xs"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[11px] text-slate-500">Email</label>
+                              <div className="mt-0.5 flex gap-2">
+                                <Input
+                                  value={editPageEmail}
+                                  onChange={(e) => handleEmailInputChange(e.target.value)}
+                                  placeholder="contact@example.com"
+                                  className="h-8 flex-1 text-xs"
+                                />
+                                <select
+                                  value={(() => {
+                                    const domain = editPageEmail.includes("@")
+                                      ? editPageEmail.split("@").pop() ?? ""
+                                      : editPageEmail
+                                    return EMAIL_ORIGINS.includes(domain) ? domain : ""
+                                  })()}
+                                  onChange={(e) => {
+                                    const v = e.target.value
+                                    if (v) setEditPageEmail(`contact@${v}`)
+                                  }}
+                                  className="h-8 w-[140px] shrink-0 rounded-md border border-slate-300 bg-white px-2 text-xs"
+                                >
+                                  <option value="">Select origin</option>
+                                  {EMAIL_ORIGINS.map((origin) => (
+                                    <option key={origin} value={origin}>
+                                      {origin}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {!editPageBlockCollapsed && editPageId && (
+                        <div className="mt-4 flex justify-end">
+                          <Button
+                            size="sm"
+                            onClick={() => void handleSaveEditPageInfo()}
+                            disabled={editPageLoading || !activeToken || !hasEditPageChanges}
+                            className="cursor-pointer bg-blue-600 px-4 text-xs text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {editPageLoading ? "Updating..." : "Update"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+                </div>
+                )}
               </div>
             </div>
           ) : (
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <Input
                 value={accountTokenInput}
-                onChange={(e) => setAccountTokenInput(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setAccountTokenInput(next)
+                  if (typeof window !== "undefined") {
+                    localStorage.setItem(ACCOUNT_TOKEN_STORAGE_KEY, next)
+                  }
+                }}
                 placeholder="Paste account user access token"
                 disabled={!isAdminVerified}
                 className="disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
@@ -1408,45 +1978,25 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                     </tr>
                   </thead>
                   <tbody>
-                    {allManagedPages.map((row, index) => {
-                      const isChecked = selectedPageIds.includes(row.id)
-                      return (
-                        <tr key={`${row.id}-${index}`} className="border-t hover:bg-slate-50/60">
-                          <td className="p-3">{index + 1}</td>
-                          <td className="p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-mono">{row.id}</span>
-                              <Button
-                                size="icon"
-                                variant="outline"
-                                onClick={() => copyToClipboard(row.id)}
-                                className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
-                                title="Copy page id"
-                              >
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </td>
-                          <td className="p-3">{row.name}</td>
-                          <td className="p-3">{row.category || "-"}</td>
-                          <td className="p-3 pr-5 text-right">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedPageIds((prev) => [...new Set([...prev, row.id])])
-                                } else {
-                                  setSelectedPageIds((prev) => prev.filter((id) => id !== row.id))
-                                }
-                              }}
-                              className="h-4 w-4 cursor-pointer accent-slate-600"
-                              aria-label={`Select page ${row.name}`}
-                            />
-                          </td>
-                        </tr>
-                      )
-                    })}
+                    {allManagedPages.map((row, index) => (
+                      <PageTableRow
+                        key={`${row.id}-${index}`}
+                        index={index}
+                        page={row}
+                        checked={selectedPageIds.includes(row.id)}
+                        onRowClick={() => {
+                          const isChecked = selectedPageIds.includes(row.id)
+                          setSelectedPageIds((prev) =>
+                            isChecked ? prev.filter((id) => id !== row.id) : [...prev, row.id]
+                          )
+                        }}
+                        onCheckboxChange={(checked) => {
+                          setSelectedPageIds((prev) =>
+                            checked ? [...new Set([...prev, row.id])] : prev.filter((id) => id !== row.id)
+                          )
+                        }}
+                      />
+                    ))}
                     {!loadingData && allManagedPages.length === 0 && (
                       <tr className="border-t">
                         <td className="p-3 text-slate-500" colSpan={5}>
@@ -1524,7 +2074,12 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                   <p className="text-sm font-medium text-slate-700">Actions</p>
                   <select
                     value={bulkSourceBmId}
-                    onChange={(e) => setBulkSourceBmId(e.target.value)}
+                    onChange={(e) => {
+                      setBulkSourceBmId(e.target.value)
+                      setEditPageId("")
+                      setEditPageSearchQuery("")
+                      setEditPageOriginal(null)
+                    }}
                     className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
                   >
                     <option value="">
@@ -1538,19 +2093,25 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                   </select>
                   <select
                     value={bulkActionType}
-                    onChange={(e) =>
-                      setBulkActionType(
-                        e.target.value as
-                          | "share-other-bm"
-                          | "add-current-bm"
-                          | "assign-user-current-bm"
-                          | "remove-user-current-bm"
-                          | "remove-page-current-bm"
-                          | "create-system-user"
-                          | "edit-system-user"
-                          | "manage-asset-groups"
-                      )
-                    }
+                    onChange={(e) => {
+                        setBulkActionType(
+                          e.target.value as
+                            | "share-other-bm"
+                            | "add-current-bm"
+                            | "assign-user-current-bm"
+                            | "remove-user-current-bm"
+                            | "remove-page-current-bm"
+                            | "create-system-user"
+                            | "edit-system-user"
+                            | "manage-asset-groups"
+                            | "edit-page-info"
+                        )
+                        if (e.target.value !== "edit-page-info") {
+                          setEditPageId("")
+                          setEditPageSearchQuery("")
+                          setEditPageOriginal(null)
+                        }
+                      }}
                     className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-xs shadow-sm"
                     disabled={!bulkSourceBmId || allowedBulkActions.length === 0}
                   >
@@ -1672,7 +2233,8 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                     bulkActionType !== "share-other-bm" &&
                     bulkActionType !== "create-system-user" &&
                     bulkActionType !== "edit-system-user" &&
-                    bulkActionType !== "manage-asset-groups" && (
+                    bulkActionType !== "manage-asset-groups" &&
+                    bulkActionType !== "edit-page-info" && (
                     <div className="space-y-2">
                       <select
                         value={bulkTargetUserMode}
@@ -1723,7 +2285,8 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                   )}
                   {bulkActionType !== "create-system-user" &&
                     bulkActionType !== "edit-system-user" &&
-                    bulkActionType !== "manage-asset-groups" && (
+                    bulkActionType !== "manage-asset-groups" &&
+                    bulkActionType !== "edit-page-info" && (
                     <>
                       <Button
                         size="sm"
@@ -1754,6 +2317,300 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                 </div>
               )}
 
+              {bulkActionType === "edit-page-info" && bulkSourceBmId && activeToken && (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  {(() => {
+                    const pagesInBm = new Set(businessPages.filter((bp) => bp.businessId === bulkSourceBmId).map((bp) => bp.id))
+                    const editPageOptions = allManagedPages.filter((p) => pagesInBm.has(p.id))
+                    if (editPageOptions.length === 0) {
+                      return (
+                        <>
+                          <div
+                            className="mb-4 flex cursor-pointer items-center justify-between gap-3"
+                            onClick={() => setEditPageBlockCollapsed((c) => !c)}
+                            onKeyDown={(e) => e.key === "Enter" && setEditPageBlockCollapsed((c) => !c)}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <h3 className="text-lg font-semibold tracking-tight">Manage Page Info</h3>
+                              {editPageBlockCollapsed ? (
+                                <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                              ) : (
+                                <ChevronUp className="h-4 w-4 shrink-0 text-slate-500" />
+                              )}
+                            </div>
+                          </div>
+                          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                            No pages in this BM are in /me/accounts. Assign pages to your account first before editing.
+                          </p>
+                        </>
+                      )
+                    }
+                    const filteredOptions = editPageSearchQuery.trim()
+                      ? editPageOptions.filter(
+                          (p) =>
+                            p.name.toLowerCase().includes(editPageSearchQuery.trim().toLowerCase()) ||
+                            p.id.includes(editPageSearchQuery.trim())
+                        )
+                      : editPageOptions
+                    return (
+                  <>
+                  <div
+                    className="mb-4 flex cursor-pointer items-center justify-between gap-3"
+                    onClick={() => setEditPageBlockCollapsed((c) => !c)}
+                    onKeyDown={(e) => e.key === "Enter" && setEditPageBlockCollapsed((c) => !c)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <h3 className="text-lg font-semibold tracking-tight">Manage Page Info</h3>
+                      {editPageBlockCollapsed ? (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                      ) : (
+                        <ChevronUp className="h-4 w-4 shrink-0 text-slate-500" />
+                      )}
+                    </div>
+                    <div
+                      className="relative w-56 shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        value={editPageSearchQuery}
+                        onChange={(e) => setEditPageSearchQuery(e.target.value)}
+                        placeholder="Search by name or ID..."
+                        className="h-9 pl-8 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="max-h-80 overflow-y-auto rounded-md border border-slate-200 bg-white">
+                        {filteredOptions.length === 0 ? (
+                          <p className="p-3 text-center text-xs text-slate-500">No pages match</p>
+                        ) : (
+                          <ul className="divide-y divide-slate-100">
+                            {filteredOptions.map((p) => (
+                              <EditPageListItem
+                                key={p.id}
+                                page={p}
+                                isSelected={editPageId === p.id}
+                                isLoading={editPageInfoLoading && editPageId === p.id}
+                                disabled={!activeToken || editPageInfoLoading}
+                                onSelect={() => {
+                                  setEditPageId(p.id)
+                                  loadingPageIdRef.current = p.id
+                                  void handleLoadEditPageInfo(p.id)
+                                }}
+                              />
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                      {!editPageBlockCollapsed && editPageId && (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="text-[11px] text-slate-500">About</label>
+                            <Input
+                              value={editPageAbout}
+                              onChange={(e) => setEditPageAbout(e.target.value)}
+                              placeholder="About"
+                              className="mt-0.5 h-8 w-full text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-slate-500">Category</label>
+                            <div className="mt-0.5 min-h-8 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                              {editPageCategoryList.length > 0
+                                ? editPageCategoryList.map((c) => c.name).join(", ")
+                                : "—"}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] text-slate-500">Address</label>
+                            <div className="mt-0.5 flex gap-2">
+                              <Input
+                                value={editPageAddress}
+                                onChange={(e) => handleAddressInputChange(e.target.value)}
+                                onPaste={(e) => {
+                                  const text = e.clipboardData.getData("text")
+                                  e.preventDefault()
+                                  handleAddressInputChange(text)
+                                }}
+                                placeholder="Street, city, zip, country"
+                                className="h-8 flex-1 text-xs"
+                              />
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    const text = await navigator.clipboard.readText()
+                                    handleAddressInputChange(text)
+                                    toast.success("Address pasted and split")
+                                  } catch {
+                                    toast.error("Failed to read clipboard")
+                                  }
+                                }}
+                                className="h-8 w-8 shrink-0 cursor-pointer border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                                title="Paste"
+                              >
+                                <ClipboardPaste className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                onClick={() => {
+                                  setEditPageAddress("")
+                                  setEditPageStreet("")
+                                  setEditPageCity("")
+                                  setEditPageZip("")
+                                  setEditPageCountry("USA")
+                                  toast.success("Address cleared")
+                                }}
+                                className="h-8 w-8 shrink-0 cursor-pointer border-red-300 bg-red-50 text-red-600 hover:bg-red-100"
+                                title="Clear"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <div>
+                                <label className="text-[10px] text-slate-400">Street</label>
+                                <Input
+                                  value={editPageStreet}
+                                  onChange={(e) => handleAddressPartChange("street", e.target.value)}
+                                  placeholder="Street"
+                                  className="mt-0.5 h-8 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-400">City</label>
+                                <Input
+                                  value={editPageCity}
+                                  onChange={(e) => handleAddressPartChange("city", e.target.value)}
+                                  placeholder="City"
+                                  className="mt-0.5 h-8 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-400">Zip</label>
+                                <Input
+                                  value={editPageZip}
+                                  onChange={(e) => handleAddressPartChange("zip", e.target.value)}
+                                  placeholder="Zip"
+                                  className="mt-0.5 h-8 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-400">Country</label>
+                                <Input
+                                  value={editPageCountry}
+                                  onChange={(e) => handleAddressPartChange("country", e.target.value)}
+                                  placeholder="Country"
+                                  className="mt-0.5 h-8 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="text-[11px] text-slate-500">Description</label>
+                            <Input
+                              value={editPageDescription}
+                              onChange={(e) => setEditPageDescription(e.target.value)}
+                              placeholder="Description"
+                              className="mt-0.5 h-8 w-full text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-slate-500">Website</label>
+                            <Input
+                              value={editPageWebsite}
+                              onChange={(e) => handleWebsiteInputChange(e.target.value)}
+                              placeholder="example.com or sub.example.com"
+                              className="mt-0.5 h-8 w-full text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-slate-500">Phone</label>
+                            <div className="mt-0.5 flex gap-2">
+                              <select
+                                value={editPagePhoneCode}
+                                onChange={(e) => setEditPagePhoneCode(e.target.value)}
+                                className="h-8 w-[110px] shrink-0 rounded-md border border-slate-300 bg-white px-2 text-xs"
+                              >
+                                {PHONE_COUNTRY_CODES.map((c) => (
+                                  <option key={c.value} value={c.value}>
+                                    {c.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <Input
+                                value={editPagePhone}
+                                onChange={(e) => handlePhoneInputChange(e.target.value)}
+                                placeholder="Phone number"
+                                className="h-8 flex-1 text-xs"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-slate-500">Email</label>
+                            <div className="mt-0.5 flex gap-2">
+                              <Input
+                                value={editPageEmail}
+                                onChange={(e) => handleEmailInputChange(e.target.value)}
+                                placeholder="contact@example.com"
+                                className="h-8 flex-1 text-xs"
+                              />
+                              <select
+                                value={(() => {
+                                  const domain = editPageEmail.includes("@")
+                                    ? editPageEmail.split("@").pop() ?? ""
+                                    : editPageEmail
+                                  return EMAIL_ORIGINS.includes(domain) ? domain : ""
+                                })()}
+                                onChange={(e) => {
+                                  const v = e.target.value
+                                  if (v) setEditPageEmail(`contact@${v}`)
+                                }}
+                                className="h-8 w-[140px] shrink-0 rounded-md border border-slate-300 bg-white px-2 text-xs"
+                              >
+                                <option value="">Select origin</option>
+                                {EMAIL_ORIGINS.map((origin) => (
+                                  <option key={origin} value={origin}>
+                                    {origin}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {!editPageBlockCollapsed && editPageId && (
+                      <div className="mt-4 flex justify-end">
+                        <Button
+                          size="sm"
+                          onClick={() => void handleSaveEditPageInfo()}
+                          disabled={editPageLoading || !activeToken || !hasEditPageChanges}
+                          className="cursor-pointer bg-blue-600 px-4 text-xs text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {editPageLoading ? "Updating..." : "Update"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  </>)
+                  })()}
+                </div>
+              )}
+
               <div className="space-y-3">
                 <h3 className="text-lg font-semibold tracking-tight">Business Managers</h3>
                 <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -1769,7 +2626,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                     </thead>
                     <tbody>
                       {businessRows.map((bm, index) => (
-                        <tr key={bm.id} className="border-t hover:bg-slate-50/60">
+                        <tr key={bm.id} className="cursor-pointer border-t hover:bg-slate-50/60">
                           <td className="p-3">{index + 1}</td>
                           <td className="w-[210px] p-3">
                             <div className="flex w-full items-center justify-between gap-1">
@@ -1885,43 +2742,25 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                       </thead>
                       <tbody>
                         {outsidePages.map((page, index) => (
-                          <tr
+                          <PageTableRow
                             key={`${page.id}-${index}`}
-                            className="border-t bg-emerald-50/40 hover:bg-emerald-50/70"
-                          >
-                            <td className="p-3">{index + 1}</td>
-                            <td className="p-3">
-                              <div className="flex w-full items-center justify-between gap-1">
-                                <span className="font-mono">{page.id}</span>
-                                <Button
-                                  size="icon"
-                                  variant="outline"
-                                  onClick={() => copyToClipboard(page.id)}
-                                  className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
-                                  title="Copy page id"
-                                >
-                                  <Copy className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            </td>
-                            <td className="p-3">{page.name}</td>
-                            <td className="p-3">{page.category || "-"}</td>
-                            <td className="p-3 text-right">
-                              <input
-                                type="checkbox"
-                                checked={outsideSelectedPageIds.includes(page.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setOutsideSelectedPageIds((prev) => [...new Set([...prev, page.id])])
-                                  } else {
-                                    setOutsideSelectedPageIds((prev) => prev.filter((id) => id !== page.id))
-                                  }
-                                }}
-                                className="h-4 w-4 cursor-pointer accent-slate-600"
-                                aria-label={`Select page ${page.name}`}
-                              />
-                            </td>
-                          </tr>
+                            index={index}
+                            page={page}
+                            checked={outsideSelectedPageIds.includes(page.id)}
+                            rowClassName="border-t bg-emerald-50/40 hover:bg-emerald-50/70"
+                            copyIconSize="sm"
+                            onRowClick={() => {
+                              const checked = outsideSelectedPageIds.includes(page.id)
+                              setOutsideSelectedPageIds((prev) =>
+                                checked ? prev.filter((id) => id !== page.id) : [...prev, page.id]
+                              )
+                            }}
+                            onCheckboxChange={(checked) => {
+                              setOutsideSelectedPageIds((prev) =>
+                                checked ? [...new Set([...prev, page.id])] : prev.filter((id) => id !== page.id)
+                              )
+                            }}
+                          />
                         ))}
                         {!loadingData && outsidePages.length === 0 && (
                           <tr className="border-t">
@@ -2056,7 +2895,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                 toast.error("Missing account user context")
                                 return
                               }
-                              void deleteByUserTokenLegacy(assignedSelectedIds, activeViewerId, activeToken)
+                              void deleteByUserToken(assignedSelectedIds, activeViewerId, activeToken)
                             }}
                             disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0 || loadingData}
                             className="h-8 cursor-pointer rounded-r-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
@@ -2127,53 +2966,35 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                   return bAssigned - aAssigned
                                 })
                                 .map((row, index) => (
-                                <tr
+                                <PageTableRow
                                   key={`${row.businessId}-${row.id}-${index}`}
-                                  className={`border-t ${
+                                  index={index}
+                                  page={row}
+                                  checked={(bmAllSelectedPageIds[bm.id] ?? []).includes(row.id)}
+                                  rowClassName={`border-t ${
                                     bm.assignedPages.some((assigned) => assigned.id === row.id)
                                       ? "bg-emerald-50/40 hover:bg-emerald-50/70"
                                       : "hover:bg-slate-50/60"
                                   }`}
-                                >
-                                  <td className="p-3">{index + 1}</td>
-                                  <td className="p-3">
-                                    <div className="flex w-full items-center justify-between gap-1">
-                                      <span className="font-mono">{row.id}</span>
-                                      <Button
-                                        size="icon"
-                                        variant="outline"
-                                        onClick={() => copyToClipboard(row.id)}
-                                        className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
-                                        title="Copy page id"
-                                      >
-                                        <Copy className="h-3.5 w-3.5" />
-                                      </Button>
-                                    </div>
-                                  </td>
-                                  <td className="p-3">{row.name}</td>
-                                  <td className="p-3">{row.category || "-"}</td>
-                                  <td className="p-3 text-right">
-                                    <input
-                                      type="checkbox"
-                                      checked={(bmAllSelectedPageIds[bm.id] ?? []).includes(row.id)}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setBmAllSelectedPageIds((prev) => ({
-                                            ...prev,
-                                            [bm.id]: [...new Set([...(prev[bm.id] ?? []), row.id])],
-                                          }))
-                                        } else {
-                                          setBmAllSelectedPageIds((prev) => ({
-                                            ...prev,
-                                            [bm.id]: (prev[bm.id] ?? []).filter((id) => id !== row.id),
-                                          }))
-                                        }
-                                      }}
-                                      className="h-4 w-4 cursor-pointer accent-slate-600"
-                                      aria-label={`Select page ${row.name}`}
-                                    />
-                                  </td>
-                                </tr>
+                                  copyIconSize="sm"
+                                  onRowClick={() => {
+                                    const checked = (bmAllSelectedPageIds[bm.id] ?? []).includes(row.id)
+                                    setBmAllSelectedPageIds((prev) => ({
+                                      ...prev,
+                                      [bm.id]: checked
+                                        ? (prev[bm.id] ?? []).filter((id) => id !== row.id)
+                                        : [...new Set([...(prev[bm.id] ?? []), row.id])],
+                                    }))
+                                  }}
+                                  onCheckboxChange={(checked) => {
+                                    setBmAllSelectedPageIds((prev) => ({
+                                      ...prev,
+                                      [bm.id]: checked
+                                        ? [...new Set([...(prev[bm.id] ?? []), row.id])]
+                                        : (prev[bm.id] ?? []).filter((id) => id !== row.id),
+                                    }))
+                                  }}
+                                />
                               ))}
                             </tbody>
                           </table>
@@ -2221,7 +3042,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                     toast.error("Missing account user context")
                                     return
                                   }
-                                  void deleteByUserTokenLegacy(assignedSelectedIds, activeViewerId, activeToken)
+                                  void deleteByUserToken(assignedSelectedIds, activeViewerId, activeToken)
                                 }}
                                 disabled={(bmAssignedSelectedPageIds[bm.id] ?? []).length === 0 || loadingData}
                                 className="h-8 cursor-pointer rounded-r-none border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
@@ -2286,46 +3107,32 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                               </tr>
                             )}
                             {bm.assignedPages.map((row, index) => (
-                              <tr key={`assigned-${bm.id}-${row.id}-${index}`} className="border-t hover:bg-slate-50/60">
-                                <td className="p-3">{index + 1}</td>
-                                <td className="p-3">
-                                  <div className="flex w-full items-center justify-between gap-1">
-                                    <span className="font-mono">{row.id}</span>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      onClick={() => copyToClipboard(row.id)}
-                                      className="h-7 w-7 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
-                                      title="Copy assigned page id"
-                                    >
-                                      <Copy className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </div>
-                                </td>
-                                <td className="p-3">{row.name}</td>
-                                <td className="p-3">{row.category || "-"}</td>
-                                <td className="p-3 text-right">
-                                  <input
-                                    type="checkbox"
-                                    checked={(bmAssignedSelectedPageIds[bm.id] ?? []).includes(row.id)}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setBmAssignedSelectedPageIds((prev) => ({
-                                          ...prev,
-                                          [bm.id]: [...new Set([...(prev[bm.id] ?? []), row.id])],
-                                        }))
-                                      } else {
-                                        setBmAssignedSelectedPageIds((prev) => ({
-                                          ...prev,
-                                          [bm.id]: (prev[bm.id] ?? []).filter((id) => id !== row.id),
-                                        }))
-                                      }
-                                    }}
-                                    className="h-4 w-4 cursor-pointer accent-slate-600"
-                                    aria-label={`Select assigned page ${row.name}`}
-                                  />
-                                </td>
-                              </tr>
+                              <PageTableRow
+                                key={`assigned-${bm.id}-${row.id}-${index}`}
+                                index={index}
+                                page={row}
+                                checked={(bmAssignedSelectedPageIds[bm.id] ?? []).includes(row.id)}
+                                copyTitle="Copy assigned page id"
+                                copyIconSize="sm"
+                                ariaLabel={`Select assigned page ${row.name}`}
+                                onRowClick={() => {
+                                  const checked = (bmAssignedSelectedPageIds[bm.id] ?? []).includes(row.id)
+                                  setBmAssignedSelectedPageIds((prev) => ({
+                                    ...prev,
+                                    [bm.id]: checked
+                                      ? (prev[bm.id] ?? []).filter((id) => id !== row.id)
+                                      : [...new Set([...(prev[bm.id] ?? []), row.id])],
+                                  }))
+                                }}
+                                onCheckboxChange={(checked) => {
+                                  setBmAssignedSelectedPageIds((prev) => ({
+                                    ...prev,
+                                    [bm.id]: checked
+                                      ? [...new Set([...(prev[bm.id] ?? []), row.id])]
+                                      : (prev[bm.id] ?? []).filter((id) => id !== row.id),
+                                  }))
+                                }}
+                              />
                             ))}
                           </tbody>
                         </table>
