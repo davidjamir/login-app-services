@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronDown, ChevronUp, ClipboardPaste, Copy, RefreshCcw, Search, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronUp, ClipboardPaste, Copy, Dices, RefreshCcw, Search, Trash2 } from "lucide-react"
 import { BASIC_LABEL, FULL_LABEL } from "@/lib/facebook-permissions"
 import { copyToClipboard } from "@/lib/copy"
 import { cn } from "@/lib/utils"
@@ -53,6 +53,26 @@ const PHONE_COUNTRY_CODES = [
 ]
 
 const ACCOUNT_TOKEN_STORAGE_KEY = "page-manager-account-token"
+
+const RAND_PHONE_NUMBERS = [
+  "+1 5053174588",
+  "+1 3052062554",
+  "+1 9805621692",
+  "+1 3052655833",
+  "+1 9383498129",
+  "+1 7042162513",
+  "+1 9838471098",
+  "+1 2536868075",
+  "+1 8655454194",
+  "+1 9834839678",
+  "+1 5052520883",
+  "+1 6459688867",
+  "+1 3052009263",
+  "+1 9834048917",
+  "+1 9832113240",
+  "+1 4724201610",
+  "+1 5056469900",
+]
 
 const EMAIL_ORIGINS = [
   "nflhub.store",
@@ -866,6 +886,11 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     } else {
       setEditPagePhone(raw)
     }
+  }
+
+  const handleRandPhone = () => {
+    const picked = RAND_PHONE_NUMBERS[Math.floor(Math.random() * RAND_PHONE_NUMBERS.length)]
+    handlePhoneInputChange(picked)
   }
 
   const handleLoadEditPageInfo = async (pageId: string) => {
@@ -1732,7 +1757,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                               </div>
                               <div>
                                 <label className="text-[11px] text-slate-500">Phone</label>
-                                <div className="mt-0.5 flex gap-2">
+                                <div className="mt-0.5 flex items-center gap-2">
                                   <select
                                     value={editPagePhoneCode}
                                     onChange={(e) => setEditPagePhoneCode(e.target.value)}
@@ -1741,17 +1766,27 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                     {PHONE_COUNTRY_CODES.map((c) => (
                                       <option key={c.value} value={c.value}>
                                         {c.label}
-                                    </option>
-                                  ))}
-                                </select>
-                                <Input
-                                  value={editPagePhone}
-                                  onChange={(e) => handlePhoneInputChange(e.target.value)}
-                                  placeholder="Phone number"
-                                  className="h-8 flex-1 text-xs"
-                                />
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <Input
+                                    value={editPagePhone}
+                                    onChange={(e) => handlePhoneInputChange(e.target.value)}
+                                    placeholder="Phone number"
+                                    className="h-8 flex-1 text-xs"
+                                  />
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    type="button"
+                                    onClick={handleRandPhone}
+                                    className="h-8 w-8 shrink-0 cursor-pointer border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100"
+                                    title="Random phone number"
+                                  >
+                                    <Dices className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
                             <div>
                               <label className="text-[11px] text-slate-500">Email</label>
                               <div className="mt-0.5 flex gap-2">
@@ -2539,7 +2574,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                           </div>
                           <div>
                             <label className="text-[11px] text-slate-500">Phone</label>
-                            <div className="mt-0.5 flex gap-2">
+                            <div className="mt-0.5 flex items-center gap-2">
                               <select
                                 value={editPagePhoneCode}
                                 onChange={(e) => setEditPagePhoneCode(e.target.value)}
@@ -2557,6 +2592,16 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                                 placeholder="Phone number"
                                 className="h-8 flex-1 text-xs"
                               />
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                type="button"
+                                onClick={handleRandPhone}
+                                className="h-8 w-8 shrink-0 cursor-pointer border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100"
+                                title="Random phone number"
+                              >
+                                <Dices className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
                           </div>
                           <div>
