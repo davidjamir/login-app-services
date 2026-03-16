@@ -95,7 +95,8 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
   const [status, setStatus] = useState("Select a system user or enter account token.")
   const [mode, setMode] = useState<SourceMode>("system-user")
   const [systemUsers, setSystemUsers] = useState<SystemUser[]>([])
-  const [selectedUserIndex, setSelectedUserIndex] = useState("")
+  const [selectedBmFilter, setSelectedBmFilter] = useState("")
+  const [selectedSystemUserId, setSelectedSystemUserId] = useState("")
   const [selectedAdminUserIndex, setSelectedAdminUserIndex] = useState("")
   const [accountTokenInput, setAccountTokenInput] = useState("")
 
@@ -181,8 +182,25 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
   const lastCrawledTokenRef = useRef<string>("")
   const loadingPageIdRef = useRef<string>("")
 
-  const selectedSystemUser =
-    selectedUserIndex !== "" ? systemUsers[Number(selectedUserIndex)] : undefined
+  const bmFilterOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const list: Array<{ id: string; name: string }> = []
+    for (const u of systemUsers) {
+      const bid = u.businessId?.trim()
+      if (bid && !seen.has(bid)) {
+        seen.add(bid)
+        list.push({ id: bid, name: u.businessName?.trim() || bid })
+      }
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name))
+  }, [systemUsers])
+
+  const filteredSystemUsers = useMemo(() => {
+    if (!selectedBmFilter) return systemUsers
+    return systemUsers.filter((u) => (u.businessId ?? "").trim() === selectedBmFilter)
+  }, [systemUsers, selectedBmFilter])
+
+  const selectedSystemUser = systemUsers.find((u) => u.id === selectedSystemUserId)
   const adminSystemUsers = useMemo(
     () => systemUsers.filter((user) => String(user.role || "").toLowerCase() === "admin"),
     [systemUsers]
@@ -342,10 +360,7 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     }
     const users = (data.data ?? []) as SystemUser[]
     setSystemUsers(users)
-    setSelectedUserIndex((prev) => {
-      const index = Number(prev)
-      return Number.isInteger(index) && index >= 0 && index < users.length ? prev : ""
-    })
+    setSelectedSystemUserId((prev) => (users.some((u) => u.id === prev) ? prev : ""))
     setSelectedAdminUserIndex("")
     return users
   }, [])
@@ -353,7 +368,8 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
   useEffect(() => {
     if (!isAdminVerified || !adminPassword.trim()) {
       setSystemUsers([])
-      setSelectedUserIndex("")
+      setSelectedBmFilter("")
+      setSelectedSystemUserId("")
       setSelectedAdminUserIndex("")
       setStatus("Select a system user or enter account token.")
       return
@@ -362,6 +378,18 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
       setStatus(`Loaded ${users.length} system user(s).`)
     })
   }, [isAdminVerified, adminPassword, loadSystemUsers])
+
+  useEffect(() => {
+    if (selectedSystemUserId && !filteredSystemUsers.some((u) => u.id === selectedSystemUserId)) {
+      setSelectedSystemUserId("")
+    }
+  }, [selectedBmFilter, filteredSystemUsers, selectedSystemUserId])
+
+  useEffect(() => {
+    if (selectedBmFilter && !bmFilterOptions.some((bm) => bm.id === selectedBmFilter)) {
+      setSelectedBmFilter("")
+    }
+  }, [bmFilterOptions, selectedBmFilter])
 
   useEffect(() => {
     setSelectedAdminUserIndex((prev) => {
@@ -1456,33 +1484,49 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
           </div>
 
           {mode === "system-user" ? (
-            <div className="space-y-2">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center">
-                <select
-                  value={selectedUserIndex}
-                  onChange={(e) => setSelectedUserIndex(e.target.value)}
-                  className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm"
-                  disabled={!isAdminVerified || systemUsers.length === 0}
-                >
-                  <option value="" disabled>
-                    {!isAdminVerified
-                      ? "Please enter admin password first"
-                      : systemUsers.length === 0
-                        ? "No system users"
-                        : "Select system user (name • app • id)"}
+            <div className="grid grid-cols-[9rem_minmax(0,1fr)_auto] gap-x-2 gap-y-2">
+              <select
+                value={selectedBmFilter}
+                onChange={(e) => setSelectedBmFilter(e.target.value)}
+                className="h-10 w-full rounded-md border border-slate-300 bg-slate-50/80 px-3 text-sm text-slate-700 shadow-sm"
+                disabled={!isAdminVerified || systemUsers.length === 0}
+                title="Filter by Business Manager"
+              >
+                <option value="">All BMs</option>
+                {bmFilterOptions.map((bm) => (
+                  <option key={bm.id} value={bm.id}>
+                    {bm.name}
                   </option>
-                  {systemUsers.map((user, index) => (
-                    <option key={index} value={String(index)}>
-                      {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
-                    </option>
-                  ))}
-                </select>
+                ))}
+              </select>
+              <select
+                value={selectedSystemUserId}
+                onChange={(e) => setSelectedSystemUserId(e.target.value)}
+                className="h-10 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm"
+                disabled={!isAdminVerified || filteredSystemUsers.length === 0}
+              >
+                <option value="" disabled>
+                  {!isAdminVerified
+                    ? "Please enter admin password first"
+                    : filteredSystemUsers.length === 0
+                      ? selectedBmFilter
+                        ? "No system users in this BM"
+                        : "No system users"
+                      : "Select system user (name • app • id)"}
+                </option>
+                {filteredSystemUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-2">
                 <Button
                   size="icon"
                   variant="outline"
                   onClick={() => copyToClipboard(selectedSystemUser?.token ?? "")}
                   disabled={!selectedSystemUser?.token}
-                  className="h-10 w-10 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
+                  className="h-10 w-10 shrink-0 cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                   title="Copy selected token"
                 >
                   <Copy className="h-4 w-4" />
@@ -1492,42 +1536,41 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                   variant="outline"
                   onClick={handleRefreshPages}
                   disabled={loadingData || !selectedSystemUser?.token}
-                  className="h-10 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50"
+                  className="h-10 shrink-0 cursor-pointer border-slate-300 bg-white px-3 text-xs hover:bg-slate-50"
                   title="Refresh pages"
                 >
                   <RefreshCcw className={`mr-1 h-3.5 w-3.5 ${loadingData ? "animate-spin" : ""}`} />
                   Refresh
                 </Button>
               </div>
-              <div className="mt-2 space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="w-36 shrink-0 text-xs text-slate-600">Select System Admin</p>
-                  <select
-                    value={selectedAdminUserIndex}
-                    onChange={(e) => setSelectedAdminUserIndex(e.target.value)}
-                    className="h-8 w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 pr-10 text-xs shadow-sm [background-position:right_0.7rem_center] disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
-                    disabled={
-                      !isAdminVerified ||
-                      filteredAdminSystemUsers.length === 0 ||
-                      selectedPageIds.length === 0
-                    }
-                  >
-                    <option value="" disabled>
-                      {!isAdminVerified
-                        ? "Please enter admin password first"
-                        : selectedPageIds.length === 0
-                          ? "Select pages in the table first"
-                          : filteredAdminSystemUsers.length === 0
-                          ? "No admin system users with same app"
-                          : "Select system admin"}
-                    </option>
-                    {filteredAdminSystemUsers.map((user, index) => (
-                      <option key={`admin-${index}`} value={String(index)}>
-                        {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
+              <p className="flex items-center text-xs text-slate-600">Select System Admin</p>
+              <select
+                value={selectedAdminUserIndex}
+                onChange={(e) => setSelectedAdminUserIndex(e.target.value)}
+                className="h-8 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 pr-10 text-xs shadow-sm [background-position:right_0.7rem_center] disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                disabled={
+                  !isAdminVerified ||
+                  filteredAdminSystemUsers.length === 0 ||
+                  selectedPageIds.length === 0
+                }
+              >
+                <option value="" disabled>
+                  {!isAdminVerified
+                    ? "Please enter admin password first"
+                    : selectedPageIds.length === 0
+                      ? "Select pages in the table first"
+                      : filteredAdminSystemUsers.length === 0
+                        ? "No admin system users with same app"
+                        : "Select system admin"}
+                </option>
+                {filteredAdminSystemUsers.map((user, index) => (
+                  <option key={`admin-${index}`} value={String(index)}>
+                    {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center">
+                <Button
                     size="sm"
                     variant={systemUserManagePageInfoVisible ? "secondary" : "outline"}
                     onClick={async () => {
@@ -1553,12 +1596,13 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                       <ChevronDown className="ml-1 h-3.5 w-3.5" />
                     )}
                   </Button>
-                </div>
-                <p className="mt-1 text-[11px] text-slate-600">
+              </div>
+              <div className="col-span-3">
+                <p className="text-[11px] text-slate-600">
                   <span className="font-semibold text-slate-800">Note:</span> Delete works only when the selected system user and system admin are in the same app.
                 </p>
                 {systemUserManagePageInfoVisible && (
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mt-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div
                     className="mb-4 flex cursor-pointer items-center justify-between gap-3"
                     onClick={() => setEditPageBlockCollapsed((c) => !c)}
