@@ -205,13 +205,18 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
     () => systemUsers.filter((user) => String(user.role || "").toLowerCase() === "admin"),
     [systemUsers]
   )
+  const isSelectedUserAdmin = String(selectedSystemUser?.role || "").toLowerCase() === "admin"
   const filteredAdminSystemUsers = useMemo(() => {
-    const selectedAppName = String(selectedSystemUser?.appName || "").trim().toLowerCase()
-    if (!selectedAppName) return adminSystemUsers
-    return adminSystemUsers.filter(
-      (user) => String(user.appName || "").trim().toLowerCase() === selectedAppName
-    )
-  }, [adminSystemUsers, selectedSystemUser?.appName])
+    if (!selectedSystemUser) return []
+    if (isSelectedUserAdmin) return [] // Admin: use selected user directly, no need to search
+    const selectedBmId = (selectedSystemUser.businessId ?? "").trim()
+    const selectedAppName = String(selectedSystemUser.appName || "").trim().toLowerCase()
+    return adminSystemUsers.filter((user) => {
+      const sameBm = (user.businessId ?? "").trim() === selectedBmId
+      const sameApp = String(user.appName || "").trim().toLowerCase() === selectedAppName
+      return sameBm && sameApp
+    })
+  }, [adminSystemUsers, selectedSystemUser, isSelectedUserAdmin])
   const selectedAdminSystemUser =
     selectedAdminUserIndex !== "" ? filteredAdminSystemUsers[Number(selectedAdminUserIndex)] : undefined
   const effectiveAdminSystemUser = selectedAdminSystemUser ?? selectedSystemUser
@@ -1544,31 +1549,37 @@ export default function PageManager({ adminPassword, isAdminVerified }: Props) {
                 </Button>
               </div>
               <p className="flex items-center text-xs text-slate-600">Select System Admin</p>
-              <select
-                value={selectedAdminUserIndex}
-                onChange={(e) => setSelectedAdminUserIndex(e.target.value)}
-                className="h-8 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 pr-10 text-xs shadow-sm [background-position:right_0.7rem_center] disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
-                disabled={
-                  !isAdminVerified ||
-                  filteredAdminSystemUsers.length === 0 ||
-                  selectedPageIds.length === 0
-                }
-              >
-                <option value="" disabled>
-                  {!isAdminVerified
-                    ? "Please enter admin password first"
-                    : selectedPageIds.length === 0
-                      ? "Select pages in the table first"
-                      : filteredAdminSystemUsers.length === 0
-                        ? "No admin system users with same app"
-                        : "Select system admin"}
-                </option>
-                {filteredAdminSystemUsers.map((user, index) => (
-                  <option key={`admin-${index}`} value={String(index)}>
-                    {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
+              {isSelectedUserAdmin ? (
+                <div className="flex h-8 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-xs text-slate-600">
+                  Using selected user (admin)
+                </div>
+              ) : (
+                <select
+                  value={selectedAdminUserIndex}
+                  onChange={(e) => setSelectedAdminUserIndex(e.target.value)}
+                  className="h-8 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 pr-10 text-xs shadow-sm [background-position:right_0.7rem_center] disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                  disabled={
+                    !isAdminVerified ||
+                    filteredAdminSystemUsers.length === 0 ||
+                    selectedPageIds.length === 0
+                  }
+                >
+                  <option value="" disabled>
+                    {!isAdminVerified
+                      ? "Please enter admin password first"
+                      : selectedPageIds.length === 0
+                        ? "Select pages in the table first"
+                        : filteredAdminSystemUsers.length === 0
+                          ? "No admin in same BM and app"
+                          : "Select system admin"}
                   </option>
-                ))}
-              </select>
+                  {filteredAdminSystemUsers.map((user, index) => (
+                    <option key={`admin-${index}`} value={String(index)}>
+                      {`${user.name} • ${user.appName || "(no-app)"} • ${user.id}`}
+                    </option>
+                  ))}
+                </select>
+              )}
               <div className="flex items-center">
                 <Button
                     size="sm"
