@@ -18,6 +18,7 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
     const [selectedBmFilter, setSelectedBmFilter] = useState("")
     const [selectedSystemUserId, setSelectedSystemUserId] = useState("")
     const [pages, setPages] = useState<FacebookPage[]>([])
+    const [selectedPageIds, setSelectedPageIds] = useState<string[]>([])
     const [saving, setSaving] = useState(false)
     const [loadingPages, setLoadingPages] = useState(false)
 
@@ -86,7 +87,8 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                 setStatus("Crawling pages...")
                 const fetchedPages = await facebookService.getPages(token)
                 setPages(fetchedPages)
-                setStatus("Pages loaded. Click Save Page Token to store in database.")
+                setSelectedPageIds([])
+                setStatus("Pages loaded. Select pages and click Save Page Token to store in database.")
             } catch (err: unknown) {
                 const message =
                     err instanceof Error ? err.message : "Unknown error"
@@ -107,13 +109,20 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
         return `${token.slice(0, 5)}...${token.slice(-5)}`
     }
 
+    const selectedPages = useMemo(
+        () => pages.filter((p) => selectedPageIds.includes(p.id)),
+        [pages, selectedPageIds]
+    )
+
+    const isAllSelected = pages.length > 0 && pages.every((p) => selectedPageIds.includes(p.id))
+
     const handlePageSave = async () => {
-        if (!pages.length) return
+        if (selectedPages.length === 0) return
 
         try {
             setSaving(true)
 
-            const payload = pages.map((page) => ({
+            const payload = selectedPages.map((page) => ({
                 pageId: page.id,
                 name: page.name,
                 source: "System User",
@@ -138,8 +147,8 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                 throw new Error(data.error || "Failed to save pages")
             }
 
-            toast.success("Saved successfully")
-            setStatus("Saved page tokens successfully.")
+            toast.success(`Saved ${selectedPages.length} page(s) successfully.`)
+            setStatus(`Saved ${selectedPages.length} page token(s) successfully.`)
         } catch (err: unknown) {
             const message =
                 err instanceof Error ? err.message : "Unknown error"
@@ -201,9 +210,9 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                         <div className="flex items-center">
                             <Button
                                 onClick={handlePageSave}
-                                disabled={!isAdminVerified || saving || loadingPages || pages.length === 0}
+                                disabled={!isAdminVerified || saving || loadingPages || pages.length === 0 || selectedPages.length === 0}
                                 className={`min-w-36 cursor-pointer border border-slate-300 shadow-sm transition-colors duration-200 ${
-                                    saving || loadingPages || pages.length === 0
+                                    saving || loadingPages || pages.length === 0 || selectedPages.length === 0
                                         ? "bg-white text-slate-400 hover:bg-white"
                                         : "bg-slate-50 text-slate-700 hover:bg-slate-100"
                                 }`}
@@ -214,7 +223,14 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                     </div>
 
                     <div className="space-y-3">
-                        <h3 className="text-lg font-semibold tracking-tight">Preview</h3>
+                        <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-lg font-semibold tracking-tight">Preview</h3>
+                            {pages.length > 0 && selectedPageIds.length > 0 && (
+                                <p className="text-xs text-slate-500">
+                                    {selectedPageIds.length} of {pages.length} selected
+                                </p>
+                            )}
+                        </div>
                         <div className="overflow-hidden rounded-xl border border-slate-200">
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50">
@@ -223,11 +239,37 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                                         <th className="p-3">Page ID</th>
                                         <th className="p-3">Page Name</th>
                                         <th className="p-3">Page Token</th>
+                                        {pages.length > 0 && (
+                                        <th className="w-12 p-3 pl-0 text-right">
+                                            <input
+                                                type="checkbox"
+                                                checked={isAllSelected}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedPageIds(pages.map((p) => p.id))
+                                                    } else {
+                                                        setSelectedPageIds([])
+                                                    }
+                                                }}
+                                                className="h-4 w-4 cursor-pointer accent-slate-600"
+                                                aria-label="Select all pages"
+                                            />
+                                        </th>
+                                        )}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {pages.map((page, index) => (
-                                        <tr key={page.id} className="border-t hover:bg-slate-50/60">
+                                        <tr
+                                            key={page.id}
+                                            className="cursor-pointer border-t hover:bg-slate-50/60"
+                                            onClick={() => {
+                                                const isChecked = selectedPageIds.includes(page.id)
+                                                setSelectedPageIds((prev) =>
+                                                    isChecked ? prev.filter((id) => id !== page.id) : [...prev, page.id]
+                                                )
+                                            }}
+                                        >
                                             <td className="p-3">{index + 1}</td>
                                             <td className="p-3">
                                                 <div className="flex items-center justify-between gap-2">
@@ -256,6 +298,20 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                                                         <Copy className="w-4 h-4" />
                                                     </Button>
                                                 </div>
+                                            </td>
+                                            <td className="w-12 p-3 pl-0 text-right" onClick={(e) => e.stopPropagation()}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedPageIds.includes(page.id)}
+                                                    onChange={(e) => {
+                                                        const checked = e.target.checked
+                                                        setSelectedPageIds((prev) =>
+                                                            checked ? [...prev, page.id] : prev.filter((id) => id !== page.id)
+                                                        )
+                                                    }}
+                                                    className="h-4 w-4 cursor-pointer accent-slate-600"
+                                                    aria-label={`Select ${page.name}`}
+                                                />
                                             </td>
                                         </tr>
                                     ))}
