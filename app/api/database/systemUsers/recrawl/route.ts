@@ -5,6 +5,22 @@ import { ObjectId } from "mongodb"
 
 export const runtime = "nodejs"
 
+const parseAppStructuredText = (raw: string) => {
+  const parts = raw
+    .split("-")
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  const roleCode = (parts[0] ?? "").toUpperCase()
+  const role =
+    roleCode === "AD" ? "admin"
+      : "employee"
+  const businessName = parts[1] ?? ""
+  const description = parts.slice(2).join(" - ")
+
+  return { roleCode: roleCode || "EM", role, businessName, description }
+}
+
 export async function POST(req: Request) {
   try {
     const { _id, password } = await req.json() as { _id?: string; password?: string }
@@ -45,14 +61,36 @@ export async function POST(req: Request) {
     }
 
     const fbUser = await facebookService.getMe(existingUser.token)
+    const parsed = parseAppStructuredText(fbUser.name)
+
+    let businessId: string | undefined
+    let businessName = parsed.businessName
+
+    try {
+      const businesses = await facebookService.getBusinesses(existingUser.token)
+      if (businesses.length === 1) {
+        businessId = businesses[0].id
+        businessName = businesses[0].name
+      }
+    } catch {
+      // Fallback to parsed name for businessName; businessId stays unchanged
+    }
+
+    const updateFields: Record<string, unknown> = {
+      name: fbUser.name,
+      businessName,
+      roleCode: parsed.roleCode,
+      role: parsed.role,
+      description: parsed.description,
+      updatedAt: new Date(),
+    }
+    if (businessId != null) {
+      updateFields.businessId = businessId
+    }
+
     await db.collection("system_users").updateOne(
       { _id: new ObjectId(_id.trim()) },
-      {
-        $set: {
-          name: fbUser.name,
-          updatedAt: new Date(),
-        },
-      }
+      { $set: updateFields }
     )
 
     return NextResponse.json({
