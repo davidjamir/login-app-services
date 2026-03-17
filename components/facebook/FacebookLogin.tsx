@@ -277,7 +277,10 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                                                     <Button
                                                         size="icon"
                                                         variant="outline"
-                                                        onClick={() => void copyToClipboard(page.id)}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            void copyToClipboard(page.id)
+                                                        }}
                                                         className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                                         title="Copy page id"
                                                     >
@@ -292,7 +295,10 @@ export default function FacebookLogin({ adminPassword, isAdminVerified }: Props)
                                                     <Button
                                                         size="icon"
                                                         variant="outline"
-                                                        onClick={() => void copyToClipboard(page.access_token)}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            void copyToClipboard(page.access_token)
+                                                        }}
                                                         className="cursor-pointer border-slate-300 bg-white hover:bg-slate-50"
                                                     >
                                                         <Copy className="w-4 h-4" />
